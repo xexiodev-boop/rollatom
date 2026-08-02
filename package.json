@@ -1,0 +1,51 @@
+{
+  "name": "rollatom",
+  "version": "0.1.0",
+  "description": "A dependency-free dice-notation parser and roller for the web platform.",
+  "license": "MIT",
+  "author": "ajdionisio",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xexiodev-boop/rollatom.git"
+  },
+  "bugs": {
+    "url": "https://github.com/xexiodev-boop/rollatom/issues"
+  },
+  "homepage": "https://github.com/xexiodev-boop/rollatom#readme",
+  "engines": {
+    "node": ">=20"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "check": "tsc --noEmit && vitest run",
+    "prepublishOnly": "npm run check && npm run build"
+  },
+  "keywords": [
+    "dice",
+    "dice-notation",
+    "rpg",
+    "ttrpg",
+    "roller",
+    "random"
+  ],
+  "devDependencies": {
+    "fast-check": "^4.5.3",
+    "typescript": "^5.8.0",
+    "vitest": "^4.1.10"
+  }
+}
