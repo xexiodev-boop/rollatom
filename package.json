@@ -1,6 +1,6 @@
 {
   "name": "rollatom",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "A dependency-free dice-notation parser and roller for the web platform.",
   "license": "MIT",
   "author": "ajdionisio",
@@ -26,13 +26,14 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "docs"
   ],
   "sideEffects": false,
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "test": "vitest run",
-    "check": "tsc --noEmit && vitest run",
+    "check": "tsc --noEmit && tsc -p tsconfig.test.json && vitest run",
     "prepublishOnly": "npm run check && npm run build"
   },
   "keywords": [
@@ -44,6 +45,7 @@
     "random"
   ],
   "devDependencies": {
+    "@types/node": "^26.4.1",
     "fast-check": "^4.5.3",
     "typescript": "^5.8.0",
     "vitest": "^4.1.10"

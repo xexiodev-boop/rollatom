@@ -8,8 +8,11 @@
     "noUncheckedIndexedAccess": false,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
+    // Sealed: the library must not reach for Node. Tests typecheck via `tsconfig.test.json`.
+    "types": [],
     "declaration": true,
     "outDir": "dist"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
 }

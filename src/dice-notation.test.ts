@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DiceError, LIMITS, rollDice, validateDice } from "./index";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Executable specification for the universal dice grammar (see `README.md`),
+// Executable specification for the universal dice grammar (see `docs/GRAMMAR.md`),
 // implemented by the RollAtom engine in `src/index.ts`.
 //
 // ── RNG contract the implementation must honor ───────────────────────────────
@@ -877,5 +877,65 @@ describe("validateDice", () => {
   it("accepts formulas that only the dice can fail, leaving those to roll time", () => {
     expect(check("1d2!")).toBeNull(); // legal; may still hit the chain cap
     expect(() => roll("1d2!", maxFace)).toThrow(DiceError);
+  });
+});
+
+// `index` is a 0-based offset into the notation as passed in, whitespace included.
+describe("error position", () => {
+  const at = (input: string) => validateDice(input)?.index;
+
+  it("points at the character the formula went wrong on", () => {
+    expect(at("6d6kh3!")).toBe(6); // the operator that follows a filter
+    expect(at("2d6}")).toBe(3); // first character the parse could not consume
+    expect(at("(2d6+d8){#red}")).toBe(8); // the appearance a group may not carry
+    expect(at("3{#red}")).toBe(1);
+    expect(at("d[3..1]")).toBe(5); // the range end, not the range
+    expect(at("2d6{#zzz}")).toBe(4); // the color token, not the character that failed to match
+  });
+
+  it("points at the token's start, not at wherever scanning stopped", () => {
+    expect(at("2000d6")).toBe(0); // the count
+    expect(at("2d6 + 9999")).toBe(6); // the constant
+    expect(at("d[1,2] min 2000")).toBe(11); // the clamp bound
+    expect(at("2d6{'unclosed}")).toBe(4); // the opening quote
+    expect(at("2d6{#red,#blue}")).toBe(9); // the second color, the one that duplicates
+  });
+
+  it("points into the text for checks that run after the parse", () => {
+    expect(at("d6!o7")).toBe(2); // the explosion glyph that can never trigger
+    expect(at("d6rru6")).toBe(2); // the reroll that would never stop
+    expect(at("d6!!!")).toBe(4); // the second explosion operator
+    expect(at("1d6 + (2d6i) + 3")).toBe(10); // the misplaced `i` itself
+  });
+
+  it("runs out of input at the offset one past the end", () => {
+    for (const truncated of ["d", "2d", "(2d6", "d[1,2", "4d6rl", "d6min"])
+      expect(at(truncated)).toBe(truncated.length);
+  });
+
+  it("has no position for the failures no single character causes", () => {
+    // Formula-wide caps: the sum across every block, and the length of the whole string.
+    expect(at("60d6 + 60d6")).toBeUndefined();
+    expect(at("2d6 + ".repeat(60) + "2d6")).toBeUndefined(); // over the length cap
+    // The length cap is measured with whitespace stripped, so 40 operands parse and 60 do not.
+    expect(at("2d6 + ".repeat(40) + "2d6")).toBe(124);
+  });
+
+  it("carries the same position whether the formula was rolled or validated", () => {
+    for (const bad of ["6d6kh3!", "d6!o7", "1d6 + (2d6i) + 3", "(2d6"]) {
+      let thrown: DiceError | undefined;
+      try {
+        roll(bad);
+      } catch (error) {
+        thrown = error as DiceError;
+      }
+      expect(thrown).toBeInstanceOf(DiceError);
+      expect(thrown!.index).toBe(at(bad));
+    }
+  });
+
+  it("is a DiceError by name, so a caught error reads as one", () => {
+    expect(validateDice("6d6kh3!")!.name).toBe("DiceError");
+    expect(String(validateDice("6d6kh3!"))).toBe("DiceError: Invalid notation");
   });
 });

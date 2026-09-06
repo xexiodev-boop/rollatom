@@ -1,16 +1,25 @@
-// RollAtom implements the dice grammar described in `README.md`. Each rolled face records its
+// RollAtom implements the dice grammar specified in `docs/GRAMMAR.md`. Each rolled face records its
 // raw roll, sign, source, appearance, and chain history. `dice-notation.test.ts` contains the
 // example-based specification, and `notation-contract.test.ts` checks its invariants. The
 // runtime has no dependencies beyond Web Crypto; applications provide palettes and other
 // integration settings through `RollOptions`.
 
-export class DiceError extends Error {}
+export class DiceError extends Error {
+  /** 0-based offset of the character at fault; absent for the formula-wide and roll-time caps. */
+  readonly index?: number;
+
+  constructor(message: string, index?: number) {
+    super(message);
+    this.name = "DiceError";
+    this.index = index;
+  }
+}
 
 // ─── Palette ─────────────────────────────────────────────────────────────────
-// Neutral defaults for `#name` colors and subtotal auto-colors. An application
-// supplies its own via `RollOptions`; nothing app-specific lives here.
+// Neutral defaults for `#name` colors and subtotal auto-colors. Frozen: an application supplies
+// its own via `RollOptions`; nothing app-specific lives here.
 
-export const DEFAULT_PALETTE: Record<string, string> = {
+export const DEFAULT_PALETTE: Readonly<Record<string, string>> = Object.freeze({
   red: "#cc3333",
   orange: "#cc7733",
   gold: "#ccaa33",
@@ -24,7 +33,7 @@ export const DEFAULT_PALETTE: Record<string, string> = {
   grey: "#888888",
   gray: "#888888",
   black: "#333333",
-};
+});
 
 const AUTO_COLORS = ["#cc3333", "#cc7733", "#ccaa33", "#4d9944", "#339999", "#3366cc", "#8855cc", "#cc6699", "#cccc44", "#888888"];
 
@@ -60,7 +69,10 @@ export interface NotationFace {
   /** This face's signed contribution to `total` and its entry in `values`. */
   value: number;
   sign: 1 | -1;
-  /** The unsigned number the die shows: a vertical explosion's summed chain, else the roll. */
+  /**
+   * The number the die shows, before `sign`: a vertical explosion's summed chain, else the roll.
+   * Not unsigned; a face list may hold negatives, so a minus `dF` is `raw: -1` with `sign: 1`.
+   */
   raw: number;
   /** The raw rolls behind `raw`, in order (`[first, ...explosions]`). Empty for constants/seals. */
   history: number[];
@@ -100,13 +112,14 @@ export interface NotationResult {
   faces: NotationFace[];
 }
 
-type RandomInt = (faceCount: number) => number;
+/** A roll source: returns a 1-based face index in `[1, faceCount]`. */
+export type RandomInt = (faceCount: number) => number;
 
 export interface RollOptions {
   /** Returns a 1-based face index in [1, faceCount]. Defaults to a CSPRNG. */
   random?: RandomInt;
   /** Color names behind `#name`. Defaults to `DEFAULT_PALETTE`. */
-  palette?: Record<string, string>;
+  palette?: Readonly<Record<string, string>>;
   /** Color for a named subtotal with no explicit color. Stable per label by default. */
   autoColor?: (label: string) => string;
 }
@@ -171,10 +184,10 @@ interface Appearance {
 type Final = "s" | "c" | "i";
 
 type Op =
-  | { kind: "clamp"; low: boolean; bound: number }
-  | { kind: "explode"; horizontal: boolean; unbounded: boolean; trigger?: number }
-  | { kind: "rerollValue"; under: boolean; bound: number; until?: true }
-  | { kind: "rerollRank"; low: boolean; count: number };
+  | { kind: "clamp"; low: boolean; bound: number; at: number }
+  | { kind: "explode"; horizontal: boolean; unbounded: boolean; trigger?: number; at: number }
+  | { kind: "rerollValue"; under: boolean; bound: number; until?: true; at: number }
+  | { kind: "rerollRank"; low: boolean; count: number; at: number };
 
 type Filter =
   | { kind: "rank"; mode: "kh" | "kl" | "km" | "dh" | "dl"; count: number }
@@ -188,6 +201,8 @@ interface BlockNode {
   ops: Op[];
   filters: Filter[];
   final?: Final;
+  /** Offset of the final glyph, for the `i`-placement error. */
+  finalAt?: number;
   scale?: NotationScale;
   atoms?: Atom[];
 }
@@ -198,6 +213,8 @@ interface GroupNode {
   ops: Op[];
   filters: Filter[];
   final?: Final;
+  /** Offset of the final glyph, for the `i`-placement error. */
+  finalAt?: number;
   scale?: NotationScale;
 }
 
@@ -219,7 +236,7 @@ interface ExprNode {
 interface P {
   src: string;
   i: number;
-  palette: Record<string, string>;
+  palette: Readonly<Record<string, string>>;
 }
 
 const SPACE = /\s/;
@@ -231,6 +248,18 @@ function skip(p: P) {
 function peek(p: P): string {
   skip(p);
   return (p.src[p.i] ?? "").toLowerCase();
+}
+
+// Offset where the next token starts, taken before it is consumed.
+function mark(p: P): number {
+  skip(p);
+  return p.i;
+}
+
+// Single exit for parse failures. `at` defaults to the scanner position, the offending character;
+// callers pass an earlier mark to point at the start of the rejected token instead.
+function fail(p: P, message: string, at: number = p.i): never {
+  throw new DiceError(message, Math.min(at, p.src.length));
 }
 
 function tryWord(p: P, word: string): boolean {
@@ -250,26 +279,27 @@ function digits(p: P): number | undefined {
 
 // A count of 1 or more; zero counts are rejected (spec: Order and errors).
 function uint(p: P, what: string): number {
+  const at = mark(p);
   const n = digits(p);
-  if (n === undefined || n < 1) throw new DiceError(`Invalid ${what}`);
+  if (n === undefined || n < 1) fail(p, `Invalid ${what}`, at);
   return n;
 }
 
 // A signed value; the minus binds greedily, so `ko - 1` is ko(−1) (spec: Order and errors).
 function int(p: P, what: string): number {
-  skip(p);
+  const at = mark(p);
   let sign = 1;
   if (p.src[p.i] === "-") {
     sign = -1;
     p.i += 1;
   }
   const n = digits(p);
-  if (n === undefined) throw new DiceError(`Invalid ${what}`);
+  if (n === undefined) fail(p, `Invalid ${what}`, at);
   return sign * n;
 }
 
-function magnitude(value: number): number {
-  if (Math.abs(value) > LIMITS.value) throw new DiceError("Value too large");
+function magnitude(p: P, value: number, at: number): number {
+  if (Math.abs(value) > LIMITS.value) fail(p, "Value too large", at);
   return value;
 }
 
@@ -278,11 +308,12 @@ function magnitude(value: number): number {
 const CONTROL = /[\u0000-\u001f\u007f]/;
 
 function quoted(p: P): string {
+  const open = p.i;
   p.i += 1; // opening quote, seen by the caller
   const end = p.src.indexOf("'", p.i);
-  if (end < 0) throw new DiceError("Unterminated string");
+  if (end < 0) fail(p, "Unterminated string", open);
   const content = p.src.slice(p.i, end);
-  if (CONTROL.test(content)) throw new DiceError("Invalid string");
+  if (CONTROL.test(content)) fail(p, "Invalid string", open);
   p.i = end + 1;
   return content;
 }
@@ -293,8 +324,9 @@ function parseFaces(p: P): DieSpec {
   skip(p);
   const ch = (p.src[p.i] ?? "").toLowerCase();
   if (/\d/.test(ch)) {
+    const size = mark(p);
     const n = digits(p)!;
-    if (n < 2 || n > LIMITS.value) throw new DiceError("Invalid die size");
+    if (n < 2 || n > LIMITS.value) fail(p, "Invalid die size", size);
     return { faces: Array.from({ length: n }, (_, k) => ({ value: k + 1 })), maxValue: n };
   }
   if (ch === "f") {
@@ -302,6 +334,7 @@ function parseFaces(p: P): DieSpec {
     return { faces: [{ value: -1, label: "-" }, { value: 0, label: "" }, { value: 1, label: "+" }], maxValue: 1 };
   }
   if (ch === "[") {
+    const list = p.i;
     p.i += 1;
     const faces: FaceSpec[] = [];
     skip(p);
@@ -319,12 +352,12 @@ function parseFaces(p: P): DieSpec {
           p.i += 1;
           break;
         }
-        throw new DiceError("Invalid face list");
+        fail(p, "Invalid face list");
       }
-    if (faces.length < 2 || faces.length > LIMITS.faces) throw new DiceError("Invalid face list");
+    if (faces.length < 2 || faces.length > LIMITS.faces) fail(p, "Invalid face list", list);
     return { faces, maxValue: Math.max(...faces.map((f) => f.value)) };
   }
-  throw new DiceError("Invalid die");
+  fail(p, "Invalid die");
 }
 
 // One face-list element, expanded to the faces it spells: a range (`1..6`, `10..60:10`),
@@ -338,18 +371,21 @@ function parseElement(p: P, position: number): FaceSpec[] {
     let assigned: number | undefined;
     if (p.src[p.i] === "=") {
       p.i += 1;
-      assigned = magnitude(int(p, "face value"));
+      const assignedAt = mark(p);
+      assigned = magnitude(p, int(p, "face value"), assignedAt);
     }
     // Positional defaults count expanded positions: each copy is a real face (see Blocks and
     // faces).
     return Array.from({ length: repetition(p) }, (_, k) => ({ value: assigned ?? position + k + 1, label }));
   }
-  const start = magnitude(int(p, "face"));
+  const startAt = mark(p);
+  const start = magnitude(p, int(p, "face"), startAt);
   skip(p);
   if (p.src[p.i] === "." && p.src[p.i + 1] === ".") {
     p.i += 2;
-    const end = magnitude(int(p, "range end"));
-    if (end < start) throw new DiceError("Descending range");
+    const endAt = mark(p);
+    const end = magnitude(p, int(p, "range end"), endAt);
+    if (end < start) fail(p, "Descending range", endAt);
     skip(p);
     let step = 1;
     if (p.src[p.i] === ":") {
@@ -367,8 +403,9 @@ function parseElement(p: P, position: number): FaceSpec[] {
 // against the face-list caps by the caller.
 function repetition(p: P): number {
   if (!tryWord(p, "x")) return 1;
+  const at = mark(p);
   const count = uint(p, "repetition count");
-  if (count > LIMITS.faces) throw new DiceError("Invalid face list");
+  if (count > LIMITS.faces) fail(p, "Invalid face list", at);
   return count;
 }
 
@@ -379,21 +416,23 @@ function parseAppearance(p: P): Appearance {
     skip(p);
     const c = p.src[p.i] ?? "";
     if (c === "'") {
+      const nameAt = p.i;
       const name = quoted(p);
-      if (!name) throw new DiceError("Invalid name");
-      if (appearance.name !== undefined) throw new DiceError("Duplicate name");
+      if (!name) fail(p, "Invalid name", nameAt);
+      if (appearance.name !== undefined) fail(p, "Duplicate name", nameAt);
       appearance.name = name;
     } else if (c === "#") {
+      const colorAt = p.i;
       p.i += 1;
       const match = /^[0-9a-zA-Z]+/.exec(p.src.slice(p.i));
-      if (!match) throw new DiceError("Invalid color");
+      if (!match) fail(p, "Invalid color", colorAt);
       p.i += match[0].length;
       const word = match[0].toLowerCase();
       const color = /^[0-9a-f]{3}$/.test(word) || /^[0-9a-f]{6}$/.test(word) ? `#${word}` : p.palette[word];
-      if (!color) throw new DiceError("Unknown color");
-      if (appearance.color !== undefined) throw new DiceError("Duplicate color");
+      if (!color) fail(p, "Unknown color", colorAt);
+      if (appearance.color !== undefined) fail(p, "Duplicate color", colorAt);
       appearance.color = color;
-    } else throw new DiceError("Invalid appearance");
+    } else fail(p, "Invalid appearance");
     skip(p);
     const d = p.src[p.i] ?? "";
     if (d === ",") {
@@ -404,7 +443,7 @@ function parseAppearance(p: P): Appearance {
       p.i += 1;
       return appearance;
     }
-    throw new DiceError("Invalid appearance");
+    fail(p, "Invalid appearance");
   }
 }
 
@@ -413,22 +452,33 @@ function parseAppearance(p: P): Appearance {
 function parseScale(p: P): NotationScale | undefined {
   const op = tryWord(p, "x") ? "x" : tryWord(p, "/") ? "/" : undefined;
   if (op === undefined) return undefined;
+  const byAt = mark(p);
   const by = uint(p, "scale factor");
-  if (by > LIMITS.value) throw new DiceError("Value too large");
+  if (by > LIMITS.value) fail(p, "Value too large", byAt);
   if (op === "/" && tryWord(p, "u")) return { op, by, up: true };
   return { op, by };
 }
 
-function parseSuffix(p: P): { ops: Op[]; filters: Filter[]; final?: Final; scale?: NotationScale } {
+function parseSuffix(p: P): {
+  ops: Op[];
+  filters: Filter[];
+  final?: Final;
+  finalAt?: number;
+  scale?: NotationScale;
+} {
   const ops: Op[] = [];
   let hasExplode = false;
   for (;;) {
+    // Marked before the glyph is consumed; the trigger analysis needs it after the parse.
+    const at = mark(p);
     if (tryWord(p, "min")) {
-      ops.push({ kind: "clamp", low: true, bound: magnitude(int(p, "clamp bound")) });
+      const boundAt = mark(p);
+      ops.push({ kind: "clamp", low: true, bound: magnitude(p, int(p, "clamp bound"), boundAt), at });
       continue;
     }
     if (tryWord(p, "max")) {
-      ops.push({ kind: "clamp", low: false, bound: magnitude(int(p, "clamp bound")) });
+      const boundAt = mark(p);
+      ops.push({ kind: "clamp", low: false, bound: magnitude(p, int(p, "clamp bound"), boundAt), at });
       continue;
     }
     const glyph = tryWord(p, "!!")
@@ -441,34 +491,34 @@ function parseSuffix(p: P): { ops: Op[]; filters: Filter[]; final?: Final; scale
             ? { horizontal: false, unbounded: true }
             : undefined;
     if (glyph) {
-      if (hasExplode) throw new DiceError("Only one explosion operator");
+      if (hasExplode) fail(p, "Only one explosion operator", at);
       hasExplode = true;
       const trigger = tryWord(p, "o") ? int(p, "trigger") : undefined;
-      ops.push({ kind: "explode", ...glyph, trigger });
+      ops.push({ kind: "explode", ...glyph, trigger, at });
       continue;
     }
     if (tryWord(p, "rru")) {
-      ops.push({ kind: "rerollValue", under: true, bound: int(p, "reroll bound"), until: true });
+      ops.push({ kind: "rerollValue", under: true, bound: int(p, "reroll bound"), until: true, at });
       continue;
     }
     if (tryWord(p, "rro")) {
-      ops.push({ kind: "rerollValue", under: false, bound: int(p, "reroll bound"), until: true });
+      ops.push({ kind: "rerollValue", under: false, bound: int(p, "reroll bound"), until: true, at });
       continue;
     }
     if (tryWord(p, "ru")) {
-      ops.push({ kind: "rerollValue", under: true, bound: int(p, "reroll bound") });
+      ops.push({ kind: "rerollValue", under: true, bound: int(p, "reroll bound"), at });
       continue;
     }
     if (tryWord(p, "ro")) {
-      ops.push({ kind: "rerollValue", under: false, bound: int(p, "reroll bound") });
+      ops.push({ kind: "rerollValue", under: false, bound: int(p, "reroll bound"), at });
       continue;
     }
     if (tryWord(p, "rl")) {
-      ops.push({ kind: "rerollRank", low: true, count: uint(p, "reroll count") });
+      ops.push({ kind: "rerollRank", low: true, count: uint(p, "reroll count"), at });
       continue;
     }
     if (tryWord(p, "rh")) {
-      ops.push({ kind: "rerollRank", low: false, count: uint(p, "reroll count") });
+      ops.push({ kind: "rerollRank", low: false, count: uint(p, "reroll count"), at });
       continue;
     }
     break;
@@ -497,48 +547,50 @@ function parseSuffix(p: P): { ops: Op[]; filters: Filter[]; final?: Final; scale
     }
     break;
   }
+  const finalAt = mark(p);
   const final = tryWord(p, "s") ? "s" : tryWord(p, "c") ? "c" : tryWord(p, "i") ? "i" : undefined;
   if (final === "s" || final === "c") {
     const scale = parseScale(p);
-    if (scale) return { ops, filters, final, scale };
+    if (scale) return { ops, filters, final, finalAt, scale };
   }
-  return final ? { ops, filters, final } : { ops, filters };
+  return final ? { ops, filters, final, finalAt } : { ops, filters };
 }
 
 function parseOperand(p: P): OperandNode {
   const ch = peek(p);
+  const operandAt = p.i;
   if (ch === "(") {
     p.i += 1;
     const expr = parseExpr(p);
     skip(p);
-    if (p.src[p.i] !== ")") throw new DiceError("Expected )");
+    if (p.src[p.i] !== ")") fail(p, "Expected )");
     p.i += 1;
     skip(p);
-    if (p.src[p.i] === "{") throw new DiceError("Appearance on a group");
+    if (p.src[p.i] === "{") fail(p, "Appearance on a group");
     return { kind: "group", expr, ...parseSuffix(p) };
   }
   if (/\d/.test(ch)) {
     const n = digits(p)!;
     if (peek(p) === "d") {
       p.i += 1;
-      return parseBlock(p, n);
+      return parseBlock(p, n, operandAt);
     }
     // Zero is a legal constant, including a +0 modifier. Only counts must be at least 1 (see Order
     // and errors), and parseBlock validates them.
-    if (n > LIMITS.value) throw new DiceError("Constant too large");
+    if (n > LIMITS.value) fail(p, "Constant too large", operandAt);
     skip(p);
-    if (p.src[p.i] === "{") throw new DiceError("Appearance on a constant");
+    if (p.src[p.i] === "{") fail(p, "Appearance on a constant");
     return { kind: "const", value: n };
   }
   if (ch === "d") {
     p.i += 1;
-    return parseBlock(p, 1);
+    return parseBlock(p, 1, operandAt);
   }
-  throw new DiceError("Invalid notation");
+  fail(p, "Invalid notation");
 }
 
-function parseBlock(p: P, count: number): BlockNode {
-  if (count < 1 || count > LIMITS.draws) throw new DiceError("Too many dice");
+function parseBlock(p: P, count: number, at: number): BlockNode {
+  if (count < 1 || count > LIMITS.draws) fail(p, "Too many dice", at);
   const die = parseFaces(p);
   skip(p);
   const appearance = p.src[p.i] === "{" ? parseAppearance(p) : {};
@@ -558,22 +610,24 @@ function parseExpr(p: P): ExprNode {
     if (ch !== "+" && ch !== "-") break;
     p.i += 1;
     operands.push({ sign: ch === "-" ? -1 : 1, node: parseOperand(p) });
-    if (operands.length > LIMITS.operands) throw new DiceError("Too many operands");
+    if (operands.length > LIMITS.operands) fail(p, "Too many operands");
   }
   return { operands };
 }
 
 // The whole parse phase: length, syntax, and every static check. It draws nothing, so
 // `validateDice` is exactly this function with the thrown error returned instead.
-function parse(src: string, palette: Record<string, string>): ExprNode {
+function parse(src: string, palette: Readonly<Record<string, string>>): ExprNode {
   const length = effectiveLength(src);
+  // No offset: no single character is at fault.
   if (!length || length > LIMITS.length) throw new DiceError("Invalid notation");
   const p: P = { src, i: 0, palette };
   const expr = parseExpr(p);
   skip(p);
-  if (p.i < src.length) throw new DiceError("Invalid notation");
+  if (p.i < src.length) fail(p, "Invalid notation");
   const rootNode = expr.operands.length === 1 && expr.operands[0].sign === 1 ? expr.operands[0].node : undefined;
   validateExpr(expr, rootNode);
+  // No offset: the cap is on the sum across every block.
   if (baseDice(expr) > LIMITS.draws) throw new DiceError("Too many dice");
   associateColors(expr);
   return expr;
@@ -604,7 +658,8 @@ function associateColors(expr: ExprNode) {
 function validateExpr(expr: ExprNode, allowI: OperandNode | undefined) {
   for (const { node } of expr.operands) {
     if (node.kind === "const") continue;
-    if (node.final === "i" && node !== allowI) throw new DiceError("`i` must be the outermost reduction");
+    if (node.final === "i" && node !== allowI)
+      throw new DiceError("`i` must be the outermost reduction", node.finalAt);
     for (const op of node.ops) {
       if (op.kind === "explode") validateExplode(node, op);
       if (op.kind === "rerollValue" && op.until) validateRerollUntil(node, op);
@@ -616,10 +671,10 @@ function validateExpr(expr: ExprNode, allowI: OperandNode | undefined) {
 function validateExplode(node: BlockNode | GroupNode, op: Op & { kind: "explode" }) {
   const dice = scopeDice(node);
   const reachable = dice.some((die) => op.trigger === undefined || die.maxValue >= op.trigger);
-  if (!reachable) throw new DiceError("Explosion can never trigger");
+  if (!reachable) throw new DiceError("Explosion can never trigger", op.at);
   if (op.unbounded) {
     const certain = dice.length > 0 && dice.every((die) => die.faces.every((face) => face.value >= (op.trigger ?? die.maxValue)));
-    if (certain) throw new DiceError("Explosion would never stop");
+    if (certain) throw new DiceError("Explosion would never stop", op.at);
   }
 }
 
@@ -629,9 +684,9 @@ function validateRerollUntil(node: BlockNode | GroupNode, op: Op & { kind: "rero
   const qualifies = (value: number) => (op.under ? value <= op.bound : value >= op.bound);
   const dice = scopeDice(node);
   const reachable = dice.some((die) => die.faces.some((face) => qualifies(face.value)));
-  if (!reachable) throw new DiceError("Reroll can never trigger");
+  if (!reachable) throw new DiceError("Reroll can never trigger", op.at);
   const certain = dice.length > 0 && dice.every((die) => die.faces.every((face) => qualifies(face.value)));
-  if (certain) throw new DiceError("Reroll would never stop");
+  if (certain) throw new DiceError("Reroll would never stop", op.at);
 }
 
 // Base dice across the whole formula, groups included: the draws phase 1 is certain to make.

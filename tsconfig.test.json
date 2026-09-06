@@ -1,0 +1,11 @@
+{
+  // `docs.test.ts` reads the documentation off disk. Separate so Node types never reach the
+  // library's own project.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "noEmit": true
+  },
+  "include": ["src"],
+  "exclude": []
+}

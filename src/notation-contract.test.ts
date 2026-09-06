@@ -143,6 +143,34 @@ describe("engine contract (properties)", () => {
     );
   });
 
+  it("an error's position, when it has one, is a real offset into the input", () => {
+    // One past the end is legal: that is where running out of input points.
+    fc.assert(
+      fc.property(fc.oneof(formulaArb, fc.string({ maxLength: 60 })), (input) => {
+        const error = validateDice(input);
+        if (error?.index === undefined) return;
+        expect(Number.isInteger(error.index)).toBe(true);
+        expect(error.index).toBeGreaterThanOrEqual(0);
+        expect(error.index).toBeLessThanOrEqual(input.length);
+      }),
+    );
+  });
+
+  it("reports the same position whether the formula was validated or rolled", () => {
+    fc.assert(
+      fc.property(fc.oneof(formulaArb, fc.string({ maxLength: 60 })), seedArb, (input, stream) => {
+        const error = validateDice(input);
+        if (!error) return;
+        try {
+          rollDice(input, { random: rngFrom(stream) });
+          expect.unreachable("a statically rejected formula rolled");
+        } catch (thrown) {
+          expect((thrown as DiceError).index).toBe(error.index);
+        }
+      }),
+    );
+  });
+
   it("validateDice accepts exactly what survives the parse phase, whatever the input string", () => {
     // The caps a roll can still hit after a formula validates: they depend on the dice, not the
     // text, so they are the only failures `validateDice` is allowed to miss.
