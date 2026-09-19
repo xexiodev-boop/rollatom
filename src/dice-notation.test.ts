@@ -739,6 +739,41 @@ describe("dice notation grammar", () => {
       expect(() => roll(`d[${"1000,".repeat(40)}1000]`)).toThrow(DiceError);
     });
 
+    describe("results past exact integer range", () => {
+      const nest = (inner: string, layers: number) => "(".repeat(layers) + inner + ")sx1000".repeat(layers);
+
+      it("rejects a seal or a total that leaves it, and validates the formula all the same", () => {
+        expect(roll(nest("9", 5)).total).toBe(9e15);
+        expect(() => roll(nest("999", 5))).toThrow("Result too large");
+        expect(() => roll(`${nest("999", 5)} + 1`)).toThrow("Result too large");
+        expect(() => roll(`-${nest("999", 5)}`)).toThrow("Result too large");
+        expect(() => roll(nest("999", 24))).toThrow("Result too large");
+        expect(validateDice(nest("999", 5))).toBeNull();
+      });
+
+      it("rejects a sum of exact parts that is not itself exact", () => {
+        // 9e15 + 7199254740000 + 991 is Number.MAX_SAFE_INTEGER, built from constants under the cap.
+        const rest = "((((7)sx1000 + 199)sx1000 + 254)sx1000 + 740)sx1000";
+        expect(roll(`${nest("9", 5)} + ${rest} + 991`).total).toBe(Number.MAX_SAFE_INTEGER);
+        expect(() => roll(`${nest("9", 5)} + ${rest} + 992`)).toThrow("Result too large");
+      });
+
+      it("rejects an inexact intermediate even when the total would land back in range", () => {
+        const big = nest("9", 5);
+        expect(() => roll(`${big} + ${big} - ${big} - ${big}`)).toThrow("Result too large");
+      });
+
+      it("holds subtotals to the same range as the total", () => {
+        // The running total alternates between 9e15 and 0; only the subtotals grow.
+        const named = (name: string) => nest(`9d[1000x2]{'${name}'}`, 4);
+        expect(() => roll(`${named("a")} - ${named("b")} + ${named("a")} - ${named("b")}`)).toThrow("Result too large");
+      });
+
+      it("divides a large result back down", () => {
+        expect(roll(`(${nest("9", 5)})s/1000`).total).toBe(9e12);
+      });
+    });
+
     // `LIMITS` is the number an application shows its users, so each exported cap is
     // pinned to the engine's real behavior: legal at the cap, rejected one past it.
     it("exports caps that match what it enforces", () => {

@@ -898,8 +898,19 @@ function applyFilter(filter: Filter, atoms: Atom[]): Atom[] {
 // default (floor) and toward plus infinity with `up` (ceiling).
 function applyScale(value: number, scale: NotationScale | undefined): number {
   if (!scale) return value;
-  if (scale.op === "x") return value * scale.by;
+  if (scale.op === "x") return exact(value * scale.by);
   return scale.up ? Math.ceil(value / scale.by) : Math.floor(value / scale.by);
+}
+
+// Nested scales can exceed the integers a double holds exactly (spec: Limits and safety).
+function exact(value: number): number {
+  if (!Number.isSafeInteger(value)) throw new DiceError("Result too large");
+  return value;
+}
+
+// Each partial sum is checked: an inexact intermediate can land back in range.
+function sumOf(atoms: Atom[]): number {
+  return atoms.reduce((sum, atom) => exact(sum + atom.sign * atom.raw), 0);
 }
 
 // Sealing collapses an array to one sourceless face with its unanimous appearance. Faces without a
@@ -907,7 +918,7 @@ function applyScale(value: number, scale: NotationScale | undefined): number {
 // and are not included outside the sealed scope.
 function seal(atoms: Atom[], final: "s" | "c", scale?: NotationScale): Atom {
   const live = atoms.filter((atom) => !atom.dropped);
-  const value = applyScale(final === "c" ? live.length : live.reduce((sum, atom) => sum + atom.sign * atom.raw, 0), scale);
+  const value = applyScale(final === "c" ? live.length : sumOf(live), scale);
   const names = live.map((atom) => atom.name).filter((n): n is string => n !== undefined);
   const colors = live.map((atom) => atom.color).filter((c): c is string => c !== undefined);
   return {
@@ -926,7 +937,7 @@ function buildSubtotals(atoms: Atom[], autoColor: (label: string) => string): No
   for (const atom of atoms) {
     if (!atom.name || atom.dropped) continue;
     const existing = byName.get(atom.name);
-    if (existing) existing.total += atom.sign * atom.raw;
+    if (existing) existing.total = exact(existing.total + atom.sign * atom.raw);
     else {
       order.push(atom.name);
       byName.set(atom.name, { label: atom.name, total: atom.sign * atom.raw, color: atom.color ?? autoColor(atom.name) });
@@ -960,8 +971,9 @@ function effectiveLength(src: string): number {
  * Returns the `DiceError` the same input would throw, or `null` when the formula is well-formed.
  * Only `palette` is read, since `#name` tokens must resolve against the palette the roll will
  * use; passing the roll's own `RollOptions` is fine. A formula that validates can still fail at
- * roll time on a limit only the dice decide: the total-draw cap once explosions and rerolls
- * draw, and the 50-roll chain cap on a single face (see Limits and safety).
+ * roll time on a limit checked during the roll: the total-draw cap once explosions and rerolls
+ * draw, the 50-roll chain cap on a single face, and a result past exact integer range (see
+ * Limits and safety).
  */
 export function validateDice(input: string, options: RollOptions = {}): DiceError | null {
   try {
@@ -989,7 +1001,7 @@ export function rollDice(input: string, options: RollOptions = {}): NotationResu
   // Reductions and flat projections use only live faces. `faces` also retains dropped faces so
   // a renderer can display the complete roll.
   const live = atoms.filter((atom) => !atom.dropped);
-  const total = applyScale(rootFinal === "c" ? live.length : live.reduce((sum, atom) => sum + atom.sign * atom.raw, 0), rootScale);
+  const total = applyScale(rootFinal === "c" ? live.length : sumOf(live), rootScale);
   const result: NotationResult = {
     notation: input.trim(),
     total,

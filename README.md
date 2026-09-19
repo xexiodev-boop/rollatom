@@ -231,7 +231,7 @@ Errors fall into two groups, and the split decides where a caller has to handle 
 | Group | Raised | Covers | Caught by `validateDice`? |
 |---|---|---|---|
 | **Static** | at parse time, before a die is drawn | syntax, unknown `#color`, formula length, operand count, `i` placement, impossible and never-halting triggers, and the base dice a formula is certain to roll | Yes |
-| **Dice-dependent** | mid-roll, once explosions and rerolls have drawn | the total draw cap, and the 50-roll chain cap on a single face | No |
+| **Roll-time** | mid-roll, as dice are drawn and reduced | the total draw cap, the 50-roll chain cap on a single face, and a result too large to hold exactly | No |
 
 An input field can therefore call [`validateDice`](#validating-without-rolling) on every keystroke
 and still needs a `try` around `rollDice` ([Limits and safety](docs/GRAMMAR.md#limits-and-safety)).
@@ -530,10 +530,11 @@ It applies every static check `rollDice` makes: syntax, formula length, operand 
 Only `palette` is read from the options, because `#name` tokens must resolve against the palette the
 roll will use; passing the roll's own `RollOptions` object is fine.
 
-Two limits depend on the dice rather than the text, so a validated formula can still fail at roll
-time: the total-draw cap once explosions and rerolls have drawn, and the 50-roll chain cap on a
-single face ([Limits and safety](docs/GRAMMAR.md#limits-and-safety)). Calling `validateDice` first does not remove
-the need to handle `DiceError` from `rollDice`.
+Three limits are checked during the roll rather than against the text, so a validated formula can
+still fail at roll time: the total-draw cap once explosions and rerolls have drawn, the 50-roll
+chain cap on a single face, and a seal or total that nested scales push past the integers a number
+holds exactly ([Limits and safety](docs/GRAMMAR.md#limits-and-safety)). Calling `validateDice`
+first does not remove the need to handle `DiceError` from `rollDice`.
 
 ## Versioning
 

@@ -480,6 +480,11 @@ LIMITS.length; // 200   LIMITS.value;    // 1000
   and scale factors is capped at ±1000; a face list holds **2–100 faces**.
 - **Formula length** ≤ 200 characters, measured after whitespace is stripped; **operands** per
   expression ≤ 20.
+- **Exact results.** Every seal, subtotal, and total, and each partial sum on the way to one, must
+  stay within ±(2<sup>53</sup> − 1), the integers a JavaScript number holds exactly. The caps above
+  bound each operand but not a product: a constant under five nested `sx1000` scales can pass that
+  range, and beyond it adding 1 no longer changes the number. Such a roll is an error, never a
+  rounded total. The check runs as the roll reduces, so `validateDice` does not catch it.
 
 ### Determinism
 
