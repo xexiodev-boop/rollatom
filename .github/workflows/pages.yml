@@ -41,6 +41,13 @@ jobs:
 
       - run: npm run build
 
+      # The page loads the engine in the browser, so a browser is where it gets proven. This runs
+      # here rather than in `check.yml` because it needs a ~115 MB download; pushes to main are
+      # rare enough to pay for it, and pull requests should not.
+      - run: npx playwright install --with-deps chromium
+
+      - run: npm run worker-check
+
       - name: Assemble the site
         run: |
           mkdir -p _site
