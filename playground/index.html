@@ -82,6 +82,14 @@
       #status.ok { color: var(--ok); }
       #status.bad { color: var(--bad); }
 
+      /* The formula echoed with the character `DiceError.index` points at marked. */
+      #where { margin: 0.35rem 0 0; font: 1.05rem/1.4 var(--mono); color: var(--muted);
+               white-space: pre-wrap; overflow-wrap: anywhere; }
+      #where[hidden] { display: none; }
+      #where mark { display: inline-block; min-width: 0.6em; color: #fff; background: var(--bad); border-radius: 3px; }
+
+      #explain { min-height: 1.4rem; margin: 0.6rem 0 0; color: var(--muted); font-size: 0.875rem; }
+
       .examples { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 1.25rem 0 0; padding: 0; list-style: none; }
       .examples button {
         font: 0.8rem/1.2 var(--mono);
@@ -127,6 +135,10 @@
       .face.dropped b { text-decoration: line-through; }
       .face .gone { text-decoration: line-through; }
 
+      .json summary { cursor: pointer; color: var(--muted); font: 600 0.8rem/1.4 inherit;
+                      text-transform: uppercase; letter-spacing: 0.08em; }
+      .json pre { margin: 0.8rem 0 0; overflow-x: auto; font: 0.8rem/1.5 var(--mono); }
+
       .subtotals { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; }
       .subtotal { display: flex; align-items: center; gap: 0.45rem; font: 0.9rem/1.4 var(--mono); }
       .swatch { width: 0.7rem; height: 0.7rem; border-radius: 50%; flex: none; }
@@ -160,9 +172,11 @@
         <button id="roll" type="button">Roll</button>
       </div>
       <p id="status" role="status" aria-live="polite"></p>
+      <p id="where" aria-hidden="true" hidden></p>
 
       <h2 style="margin-top: 1.5rem">Examples</h2>
       <ul class="examples" id="examples"></ul>
+      <p id="explain"></p>
 
       <section id="result" hidden></section>
 
@@ -179,18 +193,33 @@
       const status = document.getElementById("status");
       const result = document.getElementById("result");
 
+      const where = document.getElementById("where");
+      const explain = document.getElementById("explain");
+
       const EXAMPLES = [
-        "2d20kh1 + 5",
-        "4d6dl1",
-        "6d6ko5c",
-        "3d10!o9ko8c",
-        "(1d8* + 1d6*)kh1",
-        "(2d8+3)s/2",
-        "10d[-1,0x6,1x3]",
-        "d[10..60:10] + d6",
-        "2d6{#red,'fire'} + 1d8{'cold'}",
-        "(1d12{'hope'} + 1d12{'fear'})i",
+        ["2d20kh1 + 5", "Advantage: keep the higher of two d20, then add 5."],
+        ["4d6dl1", "Four d6, drop the lowest. The dropped die stays in the result, marked."],
+        ["6d6ko5c", "A success pool: keep the dice showing 5 or over, and count them."],
+        ["3d10!o9ko8c", "9-again: explode on 9 or over, then count the dice showing 8 or over."],
+        ["(1d8* + 1d6*)kh1", "Trait die and wild die, each exploding into its own seat; keep the higher."],
+        ["(2d8+3)s/2", "Half the modified total, rounded down."],
+        ["10d[-1,0x6,1x3]", "Net successes on a weighted d10: one face subtracts, six are blank, three count."],
+        ["d[10..60:10] + d6", "A d66: a tens die read 10 to 60, plus a units die."],
+        ["2d6{#red,'fire'} + 1d8{'cold'}", "Named dice group into subtotals: fire in the red it was given, cold in an automatic color."],
+        ["(1d12{'hope'} + 1d12{'fear'})i", "Two named d12s, listed individually instead of summed."],
       ];
+
+      // ── Errors ─────────────────────────────────────────────────────────────
+
+      // `index` may be absent, or one past the end of the input.
+      function showError(notation, error) {
+        status.textContent = error.index === undefined ? error.message : `${error.message} (character ${error.index + 1})`;
+        status.className = "bad";
+        where.hidden = error.index === undefined;
+        if (where.hidden) return;
+        const at = notation.slice(error.index, error.index + 1) || " ";
+        where.replaceChildren(notation.slice(0, error.index), el("mark", null, at), notation.slice(error.index + 1));
+      }
 
       // ── Validation, debounced ──────────────────────────────────────────────
 
@@ -199,6 +228,7 @@
 
       function validateNow() {
         const notation = field.value.trim();
+        where.hidden = true;
         if (!notation) {
           status.textContent = "";
           status.className = "";
@@ -209,11 +239,13 @@
         const error = validateDice(notation);
         button.disabled = error !== null;
         field.classList.toggle("invalid", error !== null);
-        status.textContent = error ? error.message : "valid";
-        status.className = error ? "bad" : "ok";
+        if (error) return showError(notation, error);
+        status.textContent = "valid";
+        status.className = "ok";
       }
 
       field.addEventListener("input", () => {
+        explain.textContent = "";
         clearTimeout(timer);
         timer = setTimeout(validateNow, DEBOUNCE_MS);
       });
@@ -227,10 +259,9 @@
         try {
           render(rollDice(field.value.trim()));
         } catch (error) {
-          // A formula can validate and still hit a cap only the dice decide.
+          // A formula can validate and still hit a cap checked during the roll.
           result.hidden = true;
-          status.textContent = error.message;
-          status.className = "bad";
+          showError(field.value.trim(), error);
         }
       }
 
@@ -277,6 +308,7 @@
       }
 
       function render(roll) {
+        const jsonOpen = result.querySelector(".json")?.open ?? false;
         result.replaceChildren();
 
         const head = el("div", "card");
@@ -308,19 +340,26 @@
           result.append(card);
         }
 
+        const json = el("details", "card json");
+        json.open = jsonOpen;
+        json.append(el("summary", null, "Result as JSON"), el("pre", null, JSON.stringify(roll, null, 2)));
+        result.append(json);
+
         result.hidden = false;
       }
 
       // ── Examples ───────────────────────────────────────────────────────────
 
       const examples = document.getElementById("examples");
-      for (const example of EXAMPLES) {
+      for (const [example, explanation] of EXAMPLES) {
         const item = el("li");
         const chip = el("button", null, example);
         chip.type = "button";
+        chip.title = explanation;
         chip.addEventListener("click", () => {
           field.value = example;
           field.focus();
+          explain.textContent = explanation;
           roll();
         });
         item.append(chip);
