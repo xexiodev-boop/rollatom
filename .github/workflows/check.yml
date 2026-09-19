@@ -1,0 +1,47 @@
+name: check
+
+# Typechecks the library, the tests, and runs the suite. `pages.yml` also runs
+# `npm run check`, but only once a push to main has already happened.
+#
+# The matrix is the `engines.node` floor and the version `publish.yml` ships from.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch supersedes this one; main is never cancelled.
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 24]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run check
+
+      - run: npm run build
+
+      # Against the packed tarball, so a missing `files` entry or a bad `exports` map fails here
+      # rather than after publishing.
+      - run: npm run smoke
+
+      - run: npm run size
