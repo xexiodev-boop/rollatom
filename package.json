@@ -34,6 +34,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "test": "vitest run",
+    "size": "node scripts/size.mjs",
+    "smoke": "node scripts/smoke.mjs",
     "check": "tsc --noEmit && tsc -p tsconfig.test.json && vitest run",
     "prepublishOnly": "npm run check && npm run build"
   },

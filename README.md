@@ -167,6 +167,11 @@ first: several spellings parse cleanly here and mean something different.
 The published package is one ES module that imports nothing, so it also runs straight from a URL
 or from a copy inside your own tree. Every route below loads the same file.
 
+That file is the whole library: 33.5 kB, 9.3 kB gzipped, 8.1 kB Brotli, measured 2026-09-20 on the
+current build. It is the compiler's output, not minified, so a bundler will take it further —
+12.5 kB minified, 4.4 kB gzipped with rolldown 1.2.1. `npm run build && npm run size` reprints the
+first three, and CI fails the build if they pass a budget.
+
 **From a CDN.** Any npm-backed CDN serves the built module. Pin the version, so a later release
 cannot change what the page loads:
 
