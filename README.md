@@ -23,7 +23,9 @@ rollDice("(1d12{'hope'} + 1d12{'fear'})i");  // two named d12s, listed individua
 There is a [playground](https://xexiodev-boop.github.io/rollatom/) for trying formulas: it
 validates as you type and rolls in the page.
 
-RollAtom ships as ES modules only; there is no CommonJS build. The default RNG uses the Web
+RollAtom ships as ES modules only; there is no CommonJS build. `require("rollatom")` works all
+the same on Node 20.19 and later, which can `require()` an ES module; earlier versions need
+`await import("rollatom")`, which works from CommonJS too. The default RNG uses the Web
 Crypto global (`crypto.getRandomValues`), so the supported runtimes are current browsers, web
 workers, and Node 20 or later. Older Node versions work only with a custom `random` option. A
 package manager is optional: see [Installing without npm](#installing-without-npm).
