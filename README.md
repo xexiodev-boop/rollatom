@@ -67,7 +67,9 @@ beside it.
 - **The whole roll survives into the result.** Every face reports its raw roll, its sign, the die it
   came from, the chain an explosion added, and the rolls a reroll threw away. Faces a filter removed
   stay in the result marked as dropped, so an interface can show the die that was set aside
-  ([Reading the result](#reading-the-result)).
+  ([Reading the result](#reading-the-result)). The exception is one the formula asks for: an `s` or
+  `c` inside a larger formula seals its dice into a single number, so `(2d6)s + 1` reports one
+  sealed face and the constant, not the two d6.
 - **Unusual dice are data, not engine support.** A weighted die, a narrative die, and a tens die are
   face lists (`d[-1,0x6,1x3]`, `d['cat','dog']`, `d[10..60:10]`). A system with strange dice needs
   nothing added to the roller.
@@ -298,8 +300,9 @@ Rolling `4d6dl1` against a source that yields 5, 2, 6, 3:
 
 `values` and `faces` answer different questions. **`values` is the arithmetic**: the surviving
 faces, signed, in roll order, and exactly what `total` reduces. **`faces` is the picture**: every
-die the formula touched, the ones filters removed included, marked `dropped` and contributing
-nothing. A renderer that reads only `values` has no way to dim the die that lost.
+face in the final array, the ones filters removed included, marked `dropped` and contributing
+nothing. A renderer that reads only `values` has no way to dim the die that lost. Dice inside a
+seal are the exception: they are [consumed by it](#a-face) and appear as its one face.
 
 | Field | Type | Present | Holds |
 |---|---|---|---|
@@ -324,7 +327,7 @@ nothing. A renderer that reads only `values` has no way to dim the die that lost
 | `sign` | `1` or `-1` | always | `-1` only for a face joined by `-` |
 | `raw` | `number` | always | the number the die shows, before `sign` |
 | `history` | `number[]` | always | the raw rolls behind `raw`. Empty for constants and seals |
-| `rerolls` | `number[]` | when the face rerolled | the raw rolls a reroll operator discarded, in order |
+| `rerolls` | `number[]` | when the face rerolled | the raw rolls a reroll operator discarded, in order. A discarded vertical chain is recorded as its sum, not its rolls: `1d6*rl1` on 6, 2, 3 gives `rerolls: [8]` |
 | `faces` | `number` | rolled dice only | the source die's face count, for picking an icon |
 | `label` | `string` | labeled faces | the face's own text: a Fate `+`, a `d['cat','dog']` side |
 | `name` | `string` | named dice | the name the die carries, which drives subtotals |
@@ -346,7 +349,11 @@ explosion sums the chain into one face, so `1d6*` on the same rolls returns *one
 shows the chain that built the number.
 
 **A face with no `faces` field came from no die.** A constant has `history: []` and nothing else; a
-seal has `history: []` and `sealed: true`. Both still occupy a slot in `values`.
+seal has `history: []` and `sealed: true`. Both still occupy a slot in `values`. A seal is a
+collapse, not a summary: `(2d6)s + 1` on 6 and 2 returns a sealed face with `raw: 8` and the
+constant, and the two d6, along with anything a filter dropped inside the parentheses, are not in
+the result. Only a seal inside a larger formula does this. A reducer that ends the whole formula
+(`(2d6)s`, `6d6ko4c`) is the formula's reduction, and its faces stay open.
 
 ### Names, subtotals, and modes
 
