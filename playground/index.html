@@ -3,274 +3,358 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Try rollatom dice notation in the browser: type a formula, read what it means, roll it, and see the result object." />
     <title>rollatom playground</title>
-    <meta name="description" content="Write dice notation, validate it as you type, and roll it." />
     <style>
       :root {
-        color-scheme: light dark;
-        --bg: #fbfbfc;
+        color-scheme: light;
+        --bg: #fafaf8;
         --panel: #ffffff;
-        --ink: #1a1c20;
-        --muted: #6b7280;
-        --line: #e3e5e9;
-        --accent: #3366cc;
-        --ok: #2f7a43;
-        --bad: #c0392b;
+        --ink: #1c1917;
+        --muted: #6b6560;
+        --line: #e4e1db;
+        --accent: #0f6e64;
+        --bad: #b42318;
         --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
       }
       @media (prefers-color-scheme: dark) {
-        :root {
-          --bg: #14161a;
-          --panel: #1b1e24;
-          --ink: #e8eaed;
-          --muted: #9aa1ac;
-          --line: #2b2f37;
-          --accent: #7aa2f7;
-          --ok: #6fbf83;
-          --bad: #f2777a;
-        }
+        :root { color-scheme: dark; --bg: #161514; --panel: #1e1d1b; --ink: #ece9e4; --muted: #a39e96; --line: #34322e; --accent: #5ec4b6; --bad: #ff8f80; }
       }
-
       * { box-sizing: border-box; }
+      [hidden] { display: none !important; }
+      body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+      button, input { font: inherit; }
+      button { cursor: pointer; touch-action: manipulation; }
+      button:disabled { opacity: .45; cursor: not-allowed; }
+      a { color: var(--accent); text-underline-offset: 3px; }
+      :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      h1, h2, h3, p, ul { margin: 0; }
+      h2 { font-size: .95rem; line-height: 1.4; }
+      h3 { font-size: .85rem; }
+      code, pre { font-family: var(--mono); }
+      code { font-size: .9em; }
+      .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+      .skip-link { position: absolute; top: -5rem; left: 1rem; z-index: 5; background: var(--panel); padding: .6rem; border: 1px solid var(--line); border-radius: 6px; }
+      .skip-link:focus { top: .5rem; }
 
-      body {
-        margin: 0;
-        padding: 2rem 1rem 4rem;
-        background: var(--bg);
-        color: var(--ink);
-        font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-      }
+      .topbar, main, footer { max-width: 1120px; margin: 0 auto; padding-left: 1.5rem; padding-right: 1.5rem; }
+      .topbar { display: flex; align-items: center; gap: .6rem; padding-top: 1rem; padding-bottom: 1rem; }
+      .brand { display: inline-flex; align-items: center; gap: .5rem; color: var(--ink); font-weight: 700; font-size: 1.05rem; text-decoration: none; }
+      .brand svg { width: 22px; height: 22px; }
+      .topbar > span { color: var(--muted); font-size: .85rem; }
+      nav { display: flex; gap: 1.25rem; margin-left: auto; font-size: .85rem; }
+      nav a { color: var(--muted); text-decoration: none; }
+      nav a:hover { color: var(--ink); text-decoration: underline; }
+      .lede { max-width: 46rem; margin: .25rem 0 1.25rem; color: var(--muted); }
 
-      main { max-width: 46rem; margin: 0 auto; }
+      .panel { min-width: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 1.1rem 1.25rem; }
+      .caption { display: flex; align-items: baseline; justify-content: space-between; gap: .75rem; flex-wrap: wrap; margin-bottom: .6rem; }
+      .caption code, .api { color: var(--muted); font: .72rem var(--mono); overflow-wrap: anywhere; }
+      .hint { color: var(--muted); font-size: .8rem; margin-top: .4rem; }
+      .section { margin: 2.25rem 0 .75rem; font-size: 1.1rem; }
+      .section + .hint { margin: -.5rem 0 .75rem; }
 
-      h1 { font-size: 1.4rem; margin: 0 0 0.25rem; letter-spacing: -0.01em; }
-      h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em;
-           color: var(--muted); margin: 0 0 0.6rem; font-weight: 600; }
+      /* Entry and result share the first screen; on a phone the result comes right after the input. */
+      .workspace { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto 1fr;
+                   grid-template-areas: "entry result" "details result"; gap: 1rem; align-items: start; }
+      #entry { grid-area: entry; }
+      #details { grid-area: details; }
+      #result { grid-area: result; }
+      .below { display: grid; gap: 1rem; margin-top: 1rem; }
 
-      .lede { color: var(--muted); margin: 0 0 1.75rem; }
-      .lede a { color: var(--accent); }
-
-      /* ── Input ─────────────────────────────────────────────────────────── */
-
-      .entry { display: flex; gap: 0.5rem; }
-
-      #notation {
-        flex: 1;
-        min-width: 0;
-        padding: 0.7rem 0.85rem;
-        font: 1.05rem/1.3 var(--mono);
-        color: var(--ink);
-        background: var(--panel);
-        border: 1px solid var(--line);
-        border-radius: 8px;
-      }
-      #notation:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
+      .input-label { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: .4rem; font-size: .8rem; font-weight: 600; }
+      #counter { color: var(--muted); font: .7rem var(--mono); font-weight: 400; }
+      #counter.near { color: var(--ink); }
+      #counter.over { color: var(--bad); }
+      .entry { display: flex; gap: .5rem; }
+      #notation, #seed, #guide-search { min-width: 0; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+      #notation { flex: 1; width: 100%; padding: .7rem .85rem; font: 1.1rem/1.4 var(--mono); }
+      #notation:focus, #seed:focus, #guide-search:focus { outline: 2px solid var(--accent); outline-offset: 0; }
       #notation.invalid { border-color: var(--bad); }
-
-      #roll {
-        padding: 0.7rem 1.4rem;
-        font: 600 1rem/1.3 inherit;
-        color: #fff;
-        background: var(--accent);
-        border: 0;
-        border-radius: 8px;
-        cursor: pointer;
-      }
-      #roll:disabled { opacity: 0.4; cursor: not-allowed; }
-
-      #status { min-height: 1.5rem; margin: 0.5rem 0 0; font: 0.875rem/1.5 var(--mono); }
-      #status.ok { color: var(--ok); }
+      #roll { white-space: nowrap; border: 0; border-radius: 6px; padding: .7rem 1.4rem; background: var(--ink); color: var(--bg); font-weight: 650; }
+      #roll:hover:not(:disabled) { opacity: .85; }
+      #status:empty, #explain:empty { display: none; }
+      #status { font-size: .85rem; margin-top: .6rem; overflow-wrap: anywhere; }
       #status.bad { color: var(--bad); }
+      #status .code { margin-left: .5rem; padding: .05rem .4rem; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); font: .72rem var(--mono); }
+      #where { margin-top: .35rem; font: .95rem var(--mono); color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+      #where mark { background: var(--bad); color: #fff; border-radius: 3px; min-width: .6em; display: inline-block; }
+      .presets { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin-top: .8rem; font-size: .8rem; color: var(--muted); }
 
-      /* The formula echoed with the character `DiceError.index` points at marked. */
-      #where { margin: 0.35rem 0 0; font: 1.05rem/1.4 var(--mono); color: var(--muted);
-               white-space: pre-wrap; overflow-wrap: anywhere; }
-      #where[hidden] { display: none; }
-      #where mark { display: inline-block; min-width: 0.6em; color: #fff; background: var(--bad); border-radius: 3px; }
+      .chips { display: flex; flex-wrap: wrap; gap: .4rem; margin: .7rem 0 0; padding: 0; list-style: none; }
+      .chip { display: inline-flex; align-items: center; gap: .4rem; max-width: 100%; font: .78rem/1.4 var(--mono); color: var(--ink); background: var(--bg);
+              border: 1px solid var(--line); border-radius: 6px; padding: .3rem .55rem; text-align: left; overflow-wrap: anywhere; }
+      .chip:hover { border-color: var(--accent); }
+      .chip[aria-pressed="true"] { border-color: var(--ink); }
+      .chip span { font-family: system-ui, sans-serif; color: var(--muted); }
 
-      #explain { min-height: 1.4rem; margin: 0.6rem 0 0; color: var(--muted); font-size: 0.875rem; }
+      #reads { list-style: none; padding: 0; font-size: .9rem; }
+      #reads li { padding-left: calc(var(--depth, 0) * 1.25rem); }
+      #explain { font-size: .8rem; color: var(--muted); margin-top: .5rem; }
+      .toolbar { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1rem; padding-top: .9rem; border-top: 1px solid var(--line); }
+      .quiet { font-size: .8rem; line-height: 1.4; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: .35rem .7rem; white-space: nowrap; }
+      .quiet:hover:not(:disabled) { border-color: var(--accent); }
+      .quiet[aria-pressed="true"] { border-color: var(--ink); font-weight: 600; }
+      summary { cursor: pointer; font-size: .85rem; }
+      .seed-options { margin-top: .8rem; }
+      .controls { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-top: .6rem; }
+      #seed { width: 10rem; padding: .35rem .6rem; font: .8rem var(--mono); }
 
-      .examples { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 1.25rem 0 0; padding: 0; list-style: none; }
-      .examples button {
-        font: 0.8rem/1.2 var(--mono);
-        color: var(--muted);
-        background: var(--panel);
-        border: 1px solid var(--line);
-        border-radius: 999px;
-        padding: 0.3rem 0.7rem;
-        cursor: pointer;
+      .stale { color: var(--muted); font-size: .75rem; }
+      .total { display: flex; align-items: baseline; flex-wrap: wrap; gap: .75rem; margin-bottom: 1rem; }
+      .total b { max-width: 100%; overflow-wrap: anywhere; font-size: 3rem; line-height: 1; font-weight: 700; font-variant-numeric: tabular-nums; }
+      .total span { color: var(--muted); font-size: .8rem; }
+      .faces { display: flex; flex-wrap: wrap; gap: .5rem; }
+      .face { min-width: 3.6rem; max-width: 100%; padding: .5rem .55rem .4rem; background: var(--bg); border: 1px solid var(--line);
+              border-bottom: 3px solid var(--swatch, var(--line)); border-radius: 6px; text-align: center; overflow-wrap: anywhere; }
+      .face b { display: block; font: 600 1.2rem/1.2 var(--mono); font-variant-numeric: tabular-nums; }
+      .face small { display: block; margin-top: .2rem; color: var(--muted); font: .68rem/1.3 var(--mono); }
+      .face.dropped { opacity: .55; border-style: dashed; }
+      .face.dropped b, .face .gone { text-decoration: line-through; }
+      .subtotals { display: flex; flex-wrap: wrap; gap: .4rem 1.25rem; margin-top: .4rem; }
+      .subtotal { display: flex; align-items: center; gap: .4rem; font: .85rem var(--mono); }
+      .swatch { width: .65rem; height: .65rem; border-radius: 50%; flex: none; border: 1px solid #0003; }
+      .sub { margin-top: 1rem; padding-top: .8rem; border-top: 1px solid var(--line); }
+      pre { margin: .6rem 0 0; overflow: auto; font: .75rem/1.6 var(--mono); tab-size: 2; }
+      .sub pre { max-height: 20rem; }
+
+      .integration { display: grid; grid-template-columns: 300px minmax(0, 1fr); padding: 0; }
+      .install { padding: 1.1rem 1.25rem; border-right: 1px solid var(--line); }
+      .install-command { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin: .5rem 0 .9rem; padding: .45rem .45rem .45rem .7rem; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
+      .facts { padding-left: 1.1rem; font-size: .82rem; color: var(--muted); }
+      .facts li + li { margin-top: .25rem; }
+      .install > a { display: inline-block; margin-top: .9rem; font-size: .85rem; }
+      #code { padding: 1.1rem 1.25rem; min-width: 0; }
+      #code pre { border-radius: 6px; padding: .9rem 1rem; background: var(--bg); }
+      #code-empty { align-self: center; color: var(--muted); padding: 1.25rem; font-size: .85rem; }
+      .tabs { display: flex; flex-wrap: wrap; gap: .3rem; }
+
+      .guide-header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: .5rem; }
+      #guide-search { padding: .4rem .7rem; font-size: .85rem; width: 230px; }
+      .guide-group { border-top: 1px solid var(--line); padding: .7rem 0; }
+      .guide-group:last-child { padding-bottom: 0; }
+      .guide-group summary { font-weight: 600; }
+      .guide-examples { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem 1.5rem; padding-top: .7rem; }
+      .guide-example { display: flex; align-items: flex-start; flex-direction: column; gap: .3rem; }
+      .guide-example p { font-size: .8rem; color: var(--muted); }
+      .references > details > summary { font-weight: 600; }
+
+      .chart { display: flex; align-items: flex-end; gap: 2px; height: 9rem; margin-top: .5rem; border-bottom: 1px solid var(--line); }
+      .bar { flex: 1; min-width: 0; height: 100%; display: flex; align-items: flex-end; }
+      .bar i { display: block; width: 100%; min-height: 1px; background: var(--accent); border-radius: 3px 3px 0 0; }
+      .bar.empty i { background: var(--line); }
+      .bar.here i { background: var(--ink); }
+      .bar:hover i, .bar:focus-visible i { opacity: .65; }
+      .axis { display: flex; justify-content: space-between; margin-top: .25rem; color: var(--muted); font: .72rem var(--mono); }
+      #readout { min-height: 1.4rem; margin-top: .6rem; font: .82rem var(--mono); }
+      .stats { margin-top: .4rem; color: var(--muted); font-size: .8rem; }
+      .scroll { overflow-x: auto; }
+      table { border-collapse: collapse; font: .78rem/1.5 var(--mono); margin-top: .6rem; width: 100%; }
+      th, td { text-align: left; padding: .4rem 1rem .4rem 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+      th { color: var(--muted); font-weight: 600; }
+      td.n { text-align: right; font-variant-numeric: tabular-nums; }
+      #translations { min-width: 34rem; }
+
+      #log ol { list-style: none; margin: .5rem 0 0; padding: 0; }
+      #log li + li { border-top: 1px solid var(--line); }
+      #log li button { display: flex; gap: .8rem; align-items: baseline; width: 100%; text-align: left; padding: .45rem .25rem; border: 0; border-radius: 4px; background: none; color: inherit; font: .78rem/1.4 var(--mono); }
+      #log li button:hover { background: var(--bg); }
+      #log li b { min-width: 2.5rem; text-align: right; font-variant-numeric: tabular-nums; }
+      #log li span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+      footer { margin-top: 2.5rem; padding-top: 1.25rem; padding-bottom: 2rem; color: var(--muted); font-size: .8rem; }
+
+      @media (prefers-reduced-motion: no-preference) {
+        .total b { animation: land .25s ease-out; }
+        @keyframes land { from { opacity: .3; transform: translateY(4px); } }
       }
-      .examples button:hover { color: var(--ink); border-color: var(--accent); }
-
-      /* ── Result ────────────────────────────────────────────────────────── */
-
-      #result { margin-top: 2rem; }
-      #result[hidden] { display: none; }
-
-      .card {
-        background: var(--panel);
-        border: 1px solid var(--line);
-        border-radius: 10px;
-        padding: 1.1rem 1.25rem;
-        margin-bottom: 1rem;
+      @media (max-width: 760px) {
+        .topbar, main, footer { padding-left: 1rem; padding-right: 1rem; }
+        nav { gap: .9rem; }
+        .workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; grid-template-areas: "entry" "result" "details"; }
+        .integration { grid-template-columns: 1fr; }
+        .install { border-right: 0; border-bottom: 1px solid var(--line); }
+        .guide-examples { grid-template-columns: 1fr; }
+        #guide-search { width: 100%; }
+        .guide-header label { width: 100%; }
+        .lede { font-size: .9rem; }
       }
-
-      .total { display: flex; align-items: baseline; gap: 0.75rem; flex-wrap: wrap; }
-      .total b { font-size: 2.4rem; line-height: 1; font-variant-numeric: tabular-nums; }
-      .total span { color: var(--muted); font: 0.85rem/1.4 var(--mono); }
-
-      .faces { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-
-      .face {
-        min-width: 3.5rem;
-        padding: 0.45rem 0.6rem;
-        border: 1px solid var(--line);
-        border-left: 3px solid var(--swatch, var(--line));
-        border-radius: 7px;
-        text-align: center;
+      @media (max-width: 420px) {
+        .topbar > span, nav .extra { display: none; }
       }
-      .face b { display: block; font: 600 1.15rem/1.2 var(--mono); font-variant-numeric: tabular-nums; }
-      .face small { display: block; margin-top: 0.15rem; color: var(--muted); font: 0.7rem/1.3 var(--mono); }
-      .face.dropped { opacity: 0.45; }
-      .face.dropped b { text-decoration: line-through; }
-      .face .gone { text-decoration: line-through; }
-
-      .json summary { cursor: pointer; color: var(--muted); font: 600 0.8rem/1.4 inherit;
-                      text-transform: uppercase; letter-spacing: 0.08em; }
-      .json pre { margin: 0.8rem 0 0; overflow-x: auto; font: 0.8rem/1.5 var(--mono); }
-
-      .subtotals { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; }
-      .subtotal { display: flex; align-items: center; gap: 0.45rem; font: 0.9rem/1.4 var(--mono); }
-      .swatch { width: 0.7rem; height: 0.7rem; border-radius: 50%; flex: none; }
-
-      footer { margin-top: 2.5rem; color: var(--muted); font-size: 0.85rem; }
-      footer a { color: var(--accent); }
-      code { font-family: var(--mono); font-size: 0.9em; }
     </style>
   </head>
-
   <body>
+    <a class="skip-link" href="#notation">Skip to the roller</a>
+    <header class="topbar">
+      <a class="brand" href="./">
+        <svg viewBox="0 0 36 36" fill="none" aria-hidden="true"><path d="M18 2 32 10v16l-14 8L4 26V10L18 2Z" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/><circle cx="18" cy="18" r="3.4" fill="currentColor"/></svg>
+        rollatom
+      </a>
+      <span>playground</span>
+      <nav aria-label="Project links">
+        <a href="https://github.com/xexiodev-boop/rollatom#readme">Docs</a>
+        <a class="extra" href="https://github.com/xexiodev-boop/rollatom/blob/main/docs/GRAMMAR.md">Grammar</a>
+        <a href="https://www.npmjs.com/package/rollatom">npm</a>
+        <a href="https://github.com/xexiodev-boop/rollatom">GitHub</a>
+      </nav>
+    </header>
     <main>
-      <h1>rollatom playground</h1>
+      <h1 class="visually-hidden">rollatom playground</h1>
       <p class="lede">
-        Write a formula, watch it validate as you type, then roll it.
-        The <a href="https://github.com/xexiodev-boop/rollatom/blob/main/docs/GRAMMAR.md">grammar spec</a> defines the notation.
+        A dice-notation parser and roller for JavaScript. Type a formula: this page says what it means, rolls it,
+        and shows the object your code would get back.
       </p>
 
-      <div class="entry">
-        <label for="notation" hidden>Dice notation</label>
-        <input
-          id="notation"
-          type="text"
-          value="2d20kh1 + 5"
-          spellcheck="false"
-          autocomplete="off"
-          autocapitalize="off"
-          placeholder="2d6 + 3"
-          aria-describedby="status"
-        />
-        <button id="roll" type="button">Roll</button>
+      <div class="workspace">
+        <section class="panel" id="entry" aria-label="Formula">
+          <div class="input-label"><label for="notation">Formula</label><span id="counter" aria-label="Formula length"></span></div>
+          <div class="entry">
+            <input id="notation" type="text" value="2d20kh1 + 5" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="2d6 + 3" aria-describedby="status reads" />
+            <button id="roll" type="button">Roll</button>
+          </div>
+          <p id="status" role="status" aria-live="polite"></p>
+          <p id="where" aria-hidden="true" hidden></p>
+          <div class="presets">
+            Try
+            <button class="preset chip" type="button" data-notation="2d6 + 3" aria-pressed="false">2d6 + 3</button>
+            <button class="preset chip" type="button" data-notation="2d20kh1 + 5" aria-pressed="false"><span>advantage</span>2d20kh1 + 5</button>
+            <button class="preset chip" type="button" data-notation="4d6dl1" aria-pressed="false"><span>ability score</span>4d6dl1</button>
+            <button class="preset chip" type="button" data-notation="6d6ko5c" aria-pressed="false"><span>success pool</span>6d6ko5c</button>
+            <button class="preset chip" type="button" data-notation="2d6{'fire'} + 1d8{'cold'}" aria-pressed="false"><span>named dice</span>2d6{'fire'} + 1d8{'cold'}</button>
+            <a href="#guide">more</a>
+          </div>
+        </section>
+
+        <section class="panel" id="details" aria-label="What the formula means">
+          <div id="explanation">
+            <div class="caption"><h2>What it means</h2><code>explainDice()</code></div>
+            <ul id="reads" hidden></ul>
+            <p id="explain"></p>
+          </div>
+          <div class="toolbar">
+            <button id="many" class="quiet" type="button">Roll 10,000 times</button>
+            <button id="share" class="quiet" type="button">Copy link</button>
+          </div>
+          <details class="seed-options" id="seed-options"><summary>Seed</summary>
+            <div class="controls">
+              <label for="seed" class="visually-hidden">Seed</label>
+              <input id="seed" type="text" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="any text" aria-describedby="seedhint" />
+              <button id="reseed" class="quiet" type="button">New seed</button>
+            </div>
+            <p class="hint" id="seedhint"></p>
+          </details>
+        </section>
+
+        <section class="panel" id="result" aria-label="Roll result" aria-live="polite" hidden></section>
       </div>
-      <p id="status" role="status" aria-live="polite"></p>
-      <p id="where" aria-hidden="true" hidden></p>
 
-      <h2 style="margin-top: 1.5rem">Examples</h2>
-      <ul class="examples" id="examples"></ul>
-      <p id="explain"></p>
+      <div class="below">
+        <section id="dist" class="panel" aria-label="Distribution" hidden></section>
+        <details id="history-panel" class="panel" hidden><summary>Recent rolls <span id="history-count"></span></summary><section id="log" aria-label="Recent rolls" hidden></section></details>
+      </div>
 
-      <section id="result" hidden></section>
+      <h2 class="section">Use it in your code</h2>
+      <section class="panel integration" aria-label="Install and code">
+        <div class="install">
+          <h3>Install</h3>
+          <div class="install-command"><code>npm install rollatom</code><button id="copy-install" class="quiet" type="button" aria-label="Copy install command">Copy</button></div>
+          <ul class="facts">
+            <li id="weight">One file, no dependencies.</li>
+            <li>TypeScript types included.</li>
+            <li>ES module. Runs in Node 20+, browsers, web workers and Deno.</li>
+            <li>Rolls with <code>crypto.getRandomValues</code>, or a generator you pass in.</li>
+            <li>MIT license.</li>
+          </ul>
+          <a href="https://github.com/xexiodev-boop/rollatom#calling-the-engine">API reference</a>
+        </div>
+        <section id="code" aria-label="Code example" hidden></section><p id="code-empty" hidden>Enter a valid formula to see it in code.</p>
+      </section>
 
-      <footer>
-        Rolls happen in this page, using <code>crypto.getRandomValues</code>. Nothing is sent anywhere.
-      </footer>
+      <h2 class="section" id="guide-heading">Notation by example</h2>
+      <p class="hint">Click a formula to load it and roll it. The <a href="https://github.com/xexiodev-boop/rollatom/blob/main/docs/GRAMMAR.md">grammar</a> is the full reference.</p>
+      <section class="panel" id="guide" aria-labelledby="guide-heading">
+        <div class="guide-header"><label><span class="visually-hidden">Search the examples</span><input id="guide-search" type="search" placeholder="Search: reroll, keep, Fate…" /></label></div>
+        <p id="guide-empty" class="hint" role="status" hidden>Nothing matches. Try “keep”, “Fate” or “success”.</p>
+      </section>
+      <div class="references below">
+        <details class="panel"><summary>Colors and names</summary><ul class="chips" id="palette"></ul><p class="hint">Click a color to insert it at the cursor. It goes right after the die, as in <code>2d6{#red}</code>. Add a name, <code>2d6{#red,'fire'}</code>, and those dice get their own subtotal.</p></details>
+        <details class="panel"><summary>Coming from Roll20 or Foundry</summary><p class="hint">Most notation carries over unchanged. These are the spellings that differ; click one to try it.</p><div class="scroll"><table id="translations"></table></div></details>
+      </div>
+      <noscript><p class="panel">The roller needs JavaScript. The <a href="https://github.com/xexiodev-boop/rollatom#readme">documentation</a> does not.</p></noscript>
     </main>
-
+    <footer>Rolls happen in your browser and nothing is sent anywhere. The whole page is <a href="https://github.com/xexiodev-boop/rollatom/blob/main/playground/index.html">one file</a>, if you want to see how it is wired up.</footer>
     <script type="module">
-      import { rollDice, validateDice } from "./rollatom.js";
+      import { compileDice, DEFAULT_PALETTE, DiceError, explainDice, LIMITS, rollDice, validateDice } from "./rollatom.js";
 
-      const field = document.getElementById("notation");
-      const button = document.getElementById("roll");
-      const status = document.getElementById("status");
-      const result = document.getElementById("result");
+      const $ = (id) => document.getElementById(id);
+      const field = $("notation");
+      const button = $("roll");
+      const many = $("many");
+      const status = $("status");
+      const where = $("where");
+      const reads = $("reads");
+      const explain = $("explain");
+      const seedField = $("seed");
+      const result = $("result");
+      const dist = $("dist");
+      const code = $("code");
+      const log = $("log");
 
-      const where = document.getElementById("where");
-      const explain = document.getElementById("explain");
-
-      const EXAMPLES = [
-        ["2d20kh1 + 5", "Advantage: keep the higher of two d20, then add 5."],
-        ["4d6dl1", "Four d6, drop the lowest. The dropped die stays in the result, marked."],
-        ["6d6ko5c", "A success pool: keep the dice showing 5 or over, and count them."],
-        ["3d10!o9ko8c", "9-again: explode on 9 or over, then count the dice showing 8 or over."],
-        ["(1d8* + 1d6*)kh1", "Trait die and wild die, each exploding into its own seat; keep the higher."],
-        ["(2d8+3)s/2", "Half the modified total, rounded down."],
-        ["10d[-1,0x6,1x3]", "Net successes on a weighted d10: one face subtracts, six are blank, three count."],
-        ["d[10..60:10] + d6", "A d66: a tens die read 10 to 60, plus a units die."],
-        ["2d6{#red,'fire'} + 1d8{'cold'}", "Named dice group into subtotals: fire in the red it was given, cold in an automatic color."],
-        ["(1d12{'hope'} + 1d12{'fear'})i", "Two named d12s, listed individually instead of summed."],
+      const GUIDE = [
+        ["Basics", [
+          ["2d6 + 3", "Two d6 and a modifier, summed."],
+          ["10 - 2d4", "A constant is a face like any other, and a minus flips what follows."],
+          ["d100", "Percentile."],
+          ["4dF", "Four Fate dice, each reading -1, 0 or +1."],
+        ]],
+        ["Keep and drop", [
+          ["2d20kh1 + 5", "Advantage: keep the higher of two d20, then add 5."],
+          ["2d20kl1 + 5", "Disadvantage: keep the lower."],
+          ["4d6dl1", "Four d6, drop the lowest. The dropped die stays in the result, marked."],
+          ["5d10km3", "Keep the middle three of five."],
+        ]],
+        ["Explode", [
+          ["3d6!", "Every 6 adds a new die, and the new die can explode too."],
+          ["3d6!!", "One layer only: a 6 adds a die, and that die is inert."],
+          ["1d8*", "Compounding: extra rolls add into the same die, so it still counts as one."],
+          ["3d10!o9ko8c", "9-again: explode on 9 or over, then count the dice showing 8 or over."],
+        ]],
+        ["Reroll", [
+          ["4d6ru1", "Reroll 1s once; the new value stands even if it is another 1."],
+          ["4d6rru2", "Reroll 1s and 2s until they clear."],
+          ["4d6rl1", "Reroll the lowest die, once."],
+        ]],
+        ["Count and scale", [
+          ["6d6ko5c", "A success pool: keep the dice showing 5 or over, and count them."],
+          ["(2d8+3)s/2", "Half the modified total, rounded down."],
+          ["2d8sx2 + 3", "Twice the dice, plus 3."],
+          ["(6d6ko6)c/2u", "Half the sixes, rounded up."],
+        ]],
+        ["Custom faces", [
+          ["10d[-1,0x6,1x3]", "Net successes on a weighted d10: one face subtracts, six are blank, three count."],
+          ["d[10..60:10] + d6", "A d66: a tens die read 10 to 60, plus a units die."],
+          ["2d['crit'=20,'hit'=10,'miss'=0]i", "Named faces with their own values, listed individually."],
+        ]],
+        ["Groups and names", [
+          ["(1d8* + 1d6*)kh1", "Trait die and wild die, each exploding into its own seat; keep the higher."],
+          ["((2d6)s + (2d8)s)kh1", "Seal each pair to its sum, then keep the better pair."],
+          ["2d6{#red,'fire'} + 1d8{'cold'}", "Named dice group into subtotals: fire in the red it was given, cold in an automatic color."],
+          ["(1d12{'hope'} + 1d12{'fear'})i", "Two named d12s, listed individually instead of summed."],
+        ]],
       ];
 
-      // ── Errors ─────────────────────────────────────────────────────────────
-
-      // `index` may be absent, or one past the end of the input.
-      function showError(notation, error) {
-        status.textContent = error.index === undefined ? error.message : `${error.message} (character ${error.index + 1})`;
-        status.className = "bad";
-        where.hidden = error.index === undefined;
-        if (where.hidden) return;
-        const at = notation.slice(error.index, error.index + 1) || " ";
-        where.replaceChildren(notation.slice(0, error.index), el("mark", null, at), notation.slice(error.index + 1));
-      }
-
-      // ── Validation, debounced ──────────────────────────────────────────────
-
-      let timer;
-      const DEBOUNCE_MS = 250;
-
-      function validateNow() {
-        const notation = field.value.trim();
-        where.hidden = true;
-        if (!notation) {
-          status.textContent = "";
-          status.className = "";
-          field.classList.remove("invalid");
-          button.disabled = true;
-          return;
-        }
-        const error = validateDice(notation);
-        button.disabled = error !== null;
-        field.classList.toggle("invalid", error !== null);
-        if (error) return showError(notation, error);
-        status.textContent = "valid";
-        status.className = "ok";
-      }
-
-      field.addEventListener("input", () => {
-        explain.textContent = "";
-        clearTimeout(timer);
-        timer = setTimeout(validateNow, DEBOUNCE_MS);
-      });
-
-      // ── Rolling ────────────────────────────────────────────────────────────
-
-      function roll() {
-        clearTimeout(timer);
-        validateNow();
-        if (button.disabled) return;
-        try {
-          render(rollDice(field.value.trim()));
-        } catch (error) {
-          // A formula can validate and still hit a cap checked during the roll.
-          result.hidden = true;
-          showError(field.value.trim(), error);
-        }
-      }
-
-      button.addEventListener("click", roll);
-      field.addEventListener("keydown", (event) => {
-        if (event.key === "Enter") roll();
-      });
-
-      // ── Rendering ──────────────────────────────────────────────────────────
+      // The README's "Coming from Roll20 or Foundry" table.
+      const TRANSLATIONS = [
+        { roll: "exploding pool", theirs: "3d6! (Roll20), 3d6x (Foundry)", ours: "3d6!" },
+        { roll: "explode one layer only", theirs: "3d6xo (Foundry)", ours: "3d6!!" },
+        { roll: "compounding explosion", theirs: "3d6!! (Roll20)", ours: "3d6*" },
+        { roll: "reroll 1s and 2s, once each", theirs: "4d6ro<3", ours: "4d6ru2" },
+        { roll: "reroll 1s and 2s until they clear", theirs: "4d6r<3", ours: "4d6rru2" },
+        { roll: "success pool at 5 or better", theirs: "6d6>5 (Roll20), 6d6cs>=5 (Foundry)", ours: "6d6ko5c" },
+        { roll: "half a modified total, rounded down", theirs: "floor((2d8+3)/2)", ours: "(2d8+3)s/2" },
+        { roll: "percentile", theirs: "d%", ours: "d100" },
+      ];
 
       const el = (tag, className, text) => {
         const node = document.createElement(tag);
@@ -278,6 +362,214 @@
         if (text !== undefined) node.textContent = text;
         return node;
       };
+
+      const quiet = (text, onClick) => {
+        const node = el("button", "quiet", text);
+        node.type = "button";
+        node.addEventListener("click", onClick);
+        return node;
+      };
+
+      async function copy(node, text) {
+        const label = node.textContent;
+        try {
+          await navigator.clipboard.writeText(text);
+          node.textContent = "Copied";
+        } catch {
+          node.textContent = "Copy failed";
+        }
+        setTimeout(() => (node.textContent = label), 1200);
+      }
+
+      // ── Seed ───────────────────────────────────────────────────────────────
+      // The engine ships no seeded generator; `random` is where a caller plugs one in.
+
+      function seededRandom(seed) {
+        let state = 2166136261;
+        for (const ch of seed) state = Math.imul(state ^ ch.codePointAt(0), 16777619);
+        const next = () => {
+          state = (state + 0x6d2b79f5) | 0;
+          let t = Math.imul(state ^ (state >>> 15), 1 | state);
+          t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+          return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+        return (faceCount) => Math.floor(next() * faceCount) + 1;
+      }
+
+      const seed = () => seedField.value.trim();
+      const rollOptions = () => (seed() ? { random: seededRandom(seed()) } : {});
+
+      function showSeedHint() {
+        $("seedhint").textContent = seed()
+          ? "With a seed, the same formula always gives the same roll, and the link carries both. rollatom has no seeded generator of its own: this page passes one in as the random option."
+          : "Optional. Type anything to make rolls repeatable; leave it empty for random ones.";
+        if (seed()) $("seed-options").open = true;
+      }
+
+      // ── Link ───────────────────────────────────────────────────────────────
+
+      function writeLink() {
+        const params = new URLSearchParams({ f: field.value.trim() });
+        if (seed()) params.set("seed", seed());
+        history.replaceState(null, "", `#${params}`);
+      }
+
+      function readLink() {
+        const params = new URLSearchParams(location.hash.slice(1));
+        if (!params.has("f")) return false;
+        field.value = params.get("f");
+        seedField.value = params.get("seed") ?? "";
+        return true;
+      }
+
+      // ── Errors ─────────────────────────────────────────────────────────────
+
+      // `index` may be absent, or one past the end of the input.
+      function showError(notation, error) {
+        const at = error.index === undefined ? "" : ` (character ${error.index + 1})`;
+        status.replaceChildren(error.message + at, el("span", "code", error.code));
+        status.className = "bad";
+        field.classList.add("invalid");
+        field.setAttribute("aria-invalid", "true");
+        where.hidden = error.index === undefined;
+        if (where.hidden) return;
+        const marked = notation.slice(error.index, error.index + 1) || " ";
+        where.replaceChildren(notation.slice(0, error.index), el("mark", null, marked), notation.slice(error.index + 1));
+      }
+
+      function clearError() {
+        status.replaceChildren();
+        status.className = "";
+        field.classList.remove("invalid");
+        field.removeAttribute("aria-invalid");
+        where.hidden = true;
+      }
+
+      // ── Validation ─────────────────────────────────────────────────────────
+      // The buttons and the explanation follow every keystroke; only a new error waits, so a
+      // formula that is merely unfinished does not flash red.
+
+      let timer;
+      const ERROR_DELAY_MS = 400;
+
+      // Whitespace between tokens does not count against `LIMITS.length`; inside quotes it does.
+      function effectiveLength(notation) {
+        let length = 0;
+        let quoted = false;
+        for (const ch of notation) {
+          if (ch === "'") quoted = !quoted;
+          if (quoted || !/\s/.test(ch)) length += 1;
+        }
+        return length;
+      }
+
+      function check(immediate = false) {
+        clearTimeout(timer);
+        const notation = field.value.trim();
+        const length = effectiveLength(notation);
+        $("counter").textContent = `${length} / ${LIMITS.length}`;
+        $("counter").className = length > LIMITS.length ? "over" : length > LIMITS.length * 0.8 ? "near" : "";
+
+        const error = notation ? validateDice(notation) : null;
+        const valid = notation !== "" && error === null;
+        button.disabled = many.disabled = $("share").disabled = !valid;
+        reads.hidden = code.hidden = !valid;
+        $("explanation").hidden = !valid;
+        $("code-empty").hidden = valid;
+        for (const preset of document.querySelectorAll(".preset")) {
+          preset.setAttribute("aria-pressed", String(preset.dataset.notation === notation));
+        }
+        const stale = result.querySelector(".stale");
+        if (stale) stale.hidden = last?.notation === notation;
+        if (dist.dataset.notation !== notation) {
+          run += 1;
+          dist.hidden = true;
+        }
+
+        if (!valid) {
+          if (!error) clearError();
+          else if (immediate || status.className === "bad") showError(notation, error);
+          else timer = setTimeout(() => showError(notation, error), ERROR_DELAY_MS);
+          return false;
+        }
+
+        clearError();
+        reads.replaceChildren(
+          ...explainDice(notation).map((line) => {
+            const step = el("li", null, line.trimStart());
+            step.style.setProperty("--depth", (line.length - step.textContent.length) / 2);
+            return step;
+          }),
+        );
+        showCode(notation);
+        writeLink();
+        return true;
+      }
+
+      field.addEventListener("input", () => {
+        explain.textContent = "";
+        check();
+      });
+
+      seedField.addEventListener("input", () => {
+        showSeedHint();
+        if (!button.disabled) writeLink();
+      });
+
+      // ── Rolling ────────────────────────────────────────────────────────────
+
+      let last;
+
+      function roll() {
+        if (!check(true)) return;
+        const notation = field.value.trim();
+        try {
+          const rolled = rollDice(notation, rollOptions());
+          last = rolled;
+          render(rolled);
+          remember(rolled);
+          if (!dist.hidden) markLast();
+        } catch (error) {
+          // A formula can validate and still hit a cap checked during the roll.
+          if (!(error instanceof DiceError)) throw error;
+          result.hidden = true;
+          showError(notation, error);
+        }
+      }
+
+      function load(notation) {
+        field.value = notation;
+        field.focus();
+        field.scrollIntoView({ block: "nearest" });
+        roll();
+      }
+
+      button.addEventListener("click", roll);
+      for (const input of [field, seedField])
+        input.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") roll();
+        });
+
+      $("reseed").addEventListener("click", () => {
+        seedField.value = Math.random().toString(36).slice(2, 8);
+        showSeedHint();
+        roll();
+      });
+
+      $("share").addEventListener("click", (event) => {
+        writeLink();
+        copy(event.currentTarget, location.href);
+      });
+
+      $("copy-install").addEventListener("click", (event) => copy(event.currentTarget, "npm install rollatom"));
+      for (const preset of document.querySelectorAll(".preset")) {
+        preset.addEventListener("click", () => {
+          explain.textContent = "";
+          load(preset.dataset.notation);
+        });
+      }
+
+      // ── Rendering ──────────────────────────────────────────────────────────
 
       // The source line under a face: which die it came from, or what it is instead.
       function describe(face) {
@@ -298,6 +590,7 @@
         if (face.rerolls) card.append(el("small", "gone", face.rerolls.join(" ")));
         if (face.name) card.append(el("small", null, face.name));
         if (face.label !== undefined && face.faces) card.append(el("small", null, `= ${face.value}`));
+        if (face.dropped) card.append(el("small", null, "dropped"));
 
         return card;
       }
@@ -308,26 +601,31 @@
       }
 
       function render(roll) {
-        const jsonOpen = result.querySelector(".json")?.open ?? false;
+        // Open by default where the result has a column to itself.
+        const jsonOpen = result.querySelector("details")?.open ?? matchMedia("(min-width: 761px)").matches;
+        const head = result;
         result.replaceChildren();
 
-        const head = el("div", "card");
+        const heading = el("div", "caption");
+        heading.append(el("h2", null, "Result"), el("code", null, `rollDice(${JSON.stringify(roll.notation)})`));
+        const stale = el("p", "stale", "This is the roll of an earlier formula.");
+        stale.hidden = true;
+        head.append(heading, stale);
+
+        const kept = roll.values.length;
+        const dropped = roll.faces.length - kept;
         const total = el("div", "total");
         total.append(el("b", null, String(roll.total)));
-        total.append(el("span", null, `${roll.mode}${scaleText(roll.scale)} of ${roll.values.length} face${roll.values.length === 1 ? "" : "s"}`));
+        total.append(el("span", null, `${roll.mode}${scaleText(roll.scale)} of ${kept} face${kept === 1 ? "" : "s"}${dropped ? `, ${dropped} dropped` : ""}`));
         head.append(total);
-        result.append(head);
 
-        const facesCard = el("div", "card");
-        facesCard.append(el("h2", null, "Faces"));
         const faces = el("div", "faces");
         for (const face of roll.faces) faces.append(faceCard(face));
-        facesCard.append(faces);
-        result.append(facesCard);
+        head.append(faces);
 
         if (roll.subtotals) {
-          const card = el("div", "card");
-          card.append(el("h2", null, "Subtotals"));
+          const card = el("div", "sub");
+          card.append(el("h3", null, "Subtotals by name"));
           const list = el("div", "subtotals");
           for (const subtotal of roll.subtotals) {
             const row = el("div", "subtotal");
@@ -337,36 +635,332 @@
             list.append(row);
           }
           card.append(list);
-          result.append(card);
+          head.append(card);
         }
 
-        const json = el("details", "card json");
+        const json = el("details", "sub");
         json.open = jsonOpen;
-        json.append(el("summary", null, "Result as JSON"), el("pre", null, JSON.stringify(roll, null, 2)));
-        result.append(json);
+        json.append(el("summary", null, "The object rollDice returns"), el("pre", null, JSON.stringify(roll, null, 2)));
+        head.append(json);
 
         result.hidden = false;
       }
 
-      // ── Examples ───────────────────────────────────────────────────────────
+      // ── Distribution ───────────────────────────────────────────────────────
+      // One `compileDice`, many `roll()`s. A roll that hits a roll-time cap is counted and
+      // reported, never dropped silently: leaving those out unmentioned would bias the picture.
 
-      const examples = document.getElementById("examples");
-      for (const [example, explanation] of EXAMPLES) {
-        const item = el("li");
-        const chip = el("button", null, example);
-        chip.type = "button";
-        chip.title = explanation;
-        chip.addEventListener("click", () => {
-          field.value = example;
-          field.focus();
-          explain.textContent = explanation;
-          roll();
-        });
-        item.append(chip);
-        examples.append(item);
+      const SAMPLES = 10000;
+      const MAX_BARS = 60;
+      let run = 0;
+      let charted;
+
+      const percent = (count, of) => `${((count / of) * 100).toFixed(count / of < 0.1 ? 2 : 1)}%`;
+
+      function distHeading(notation) {
+        const heading = el("div", "caption");
+        heading.append(el("h2", null, `${SAMPLES.toLocaleString("en")} rolls`), el("code", null, `compileDice(${JSON.stringify(notation)}).roll()`));
+        return heading;
       }
 
-      validateNow();
+      async function sample() {
+        if (!check(true)) return;
+        const notation = field.value.trim();
+        const id = ++run;
+        const compiled = compileDice(notation, rollOptions());
+        const counts = new Map();
+        const capped = new Map();
+
+        dist.dataset.notation = notation;
+        dist.replaceChildren(distHeading(notation), el("p", "stats", "Rolling…"));
+        dist.hidden = false;
+        dist.scrollIntoView({ block: "nearest", behavior: "smooth" });
+
+        let busy = 0;
+        let slice = performance.now();
+        for (let n = 0; n < SAMPLES; n += 1) {
+          try {
+            const total = compiled.roll().total;
+            counts.set(total, (counts.get(total) ?? 0) + 1);
+          } catch (error) {
+            if (!(error instanceof DiceError)) throw error;
+            capped.set(error.code, (capped.get(error.code) ?? 0) + 1);
+          }
+          if (performance.now() - slice > 40) {
+            busy += performance.now() - slice;
+            dist.lastChild.textContent = `Rolling… ${n.toLocaleString("en")} of ${SAMPLES.toLocaleString("en")}`;
+            await new Promise((resume) => setTimeout(resume));
+            if (id !== run) return;
+            slice = performance.now();
+          }
+        }
+        busy += performance.now() - slice;
+        renderDistribution(notation, counts, capped, busy);
+      }
+
+      function renderDistribution(notation, counts, capped, busy) {
+        const kept = [...counts.values()].reduce((sum, count) => sum + count, 0);
+        const skipped = SAMPLES - kept;
+        const perSecond = Math.round(SAMPLES / (busy / 1000) / 1000) * 1000;
+        const speed = `Parsed once, rolled ${SAMPLES.toLocaleString("en")} times in ${Math.round(busy)} ms: about ${perSecond.toLocaleString("en")} rolls a second on this machine.`;
+
+        dist.replaceChildren(distHeading(notation));
+        if (skipped) {
+          const codes = [...capped].map(([code, count]) => `${code} ${count.toLocaleString("en")}`).join(", ");
+          const left = kept ? "and are not in the chart" : "so there is nothing to chart";
+          dist.append(el("p", "stats", `${skipped.toLocaleString("en")} of ${SAMPLES.toLocaleString("en")} rolls hit a roll-time cap (${codes}), ${left}.`));
+        }
+        if (!kept) return dist.append(el("p", "stats", speed));
+
+        const totals = [...counts.keys()].sort((a, b) => a - b);
+        const min = totals[0];
+        const max = totals[totals.length - 1];
+        const width = Math.ceil((max - min + 1) / MAX_BARS);
+        const bins = Array.from({ length: Math.ceil((max - min + 1) / width) }, (_, k) => ({
+          from: min + k * width,
+          to: Math.min(max, min + (k + 1) * width - 1),
+          count: 0,
+        }));
+        for (const [total, count] of counts) bins[Math.floor((total - min) / width)].count += count;
+        const tallest = Math.max(...bins.map((bin) => bin.count));
+        const name = (bin) => (bin.from === bin.to ? String(bin.from) : `${bin.from} to ${bin.to}`);
+
+        let seen = 0;
+        let median = min;
+        let mean = 0;
+        for (const total of totals) {
+          if (seen < kept / 2) median = total;
+          seen += counts.get(total);
+          mean += (total * counts.get(total)) / kept;
+        }
+
+        const readout = el("p");
+        readout.id = "readout";
+        const rest = `Mean ${mean.toFixed(2)}, median ${median}, seen from ${min} to ${max}.`;
+        const chart = el("div", "chart");
+        chart.setAttribute("role", "img");
+        chart.setAttribute("aria-label", `Histogram of totals for ${notation}. ${rest}`);
+        for (const bin of bins) {
+          const bar = el("div", bin.count ? "bar" : "bar empty");
+          bar.tabIndex = 0;
+          bar.dataset.from = bin.from;
+          bar.dataset.to = bin.to;
+          const fill = el("i");
+          fill.style.height = `${(bin.count / tallest) * 100}%`;
+          bar.append(fill);
+          const say = () => (readout.textContent = `${name(bin)}: ${percent(bin.count, kept)} (${bin.count.toLocaleString("en")} rolls)`);
+          bar.addEventListener("pointerenter", say);
+          bar.addEventListener("focus", say);
+          chart.append(bar);
+        }
+        chart.addEventListener("pointerleave", () => (readout.textContent = rest));
+        readout.textContent = rest;
+
+        const axis = el("div", "axis");
+        axis.append(el("span", null, String(min)), el("span", null, "total"), el("span", null, String(max)));
+
+        const table = el("table");
+        const header = el("tr");
+        header.append(el("th", null, "Total"), el("th", null, "Rolls"), el("th", null, "Share"));
+        table.append(header);
+        for (const bin of bins) {
+          const row = el("tr");
+          row.append(el("td", null, name(bin)), el("td", "n", bin.count.toLocaleString("en")), el("td", "n", percent(bin.count, kept)));
+          table.append(row);
+        }
+        const asTable = el("details");
+        asTable.style.marginTop = "0.75rem";
+        const scroll = el("div", "scroll");
+        scroll.append(table);
+        asTable.append(el("summary", null, "As a table"), scroll);
+
+        const marked = el("p", "stats");
+        marked.id = "marked";
+        dist.append(chart, axis, readout, marked, el("p", "stats", speed), asTable);
+        charted = { counts, kept };
+        markLast();
+      }
+
+      // The latest roll of the charted formula, placed on its own distribution.
+      function markLast() {
+        const marked = $("marked");
+        if (!marked) return;
+        for (const bar of dist.querySelectorAll(".bar.here")) bar.classList.remove("here");
+        if (!last || last.notation !== dist.dataset.notation) return void (marked.textContent = "");
+        for (const bar of dist.querySelectorAll(".bar"))
+          bar.classList.toggle("here", last.total >= Number(bar.dataset.from) && last.total <= Number(bar.dataset.to));
+        let atLeast = 0;
+        for (const [total, count] of charted.counts) if (total >= last.total) atLeast += count;
+        marked.textContent = `The dark bar is your last roll, ${last.total}. ${percent(atLeast, charted.kept)} of rolls were that high or higher.`;
+      }
+
+      many.addEventListener("click", sample);
+
+      // ── Use it in code ─────────────────────────────────────────────────────
+
+      let snippet = "npm";
+
+      function showCode(notation) {
+        const literal = JSON.stringify(notation);
+        const SNIPPETS = {
+          npm: `// npm install rollatom\nimport { rollDice } from "rollatom";\n\nconst roll = rollDice(${literal});\nroll.total;  // the number\nroll.faces;  // every die, the dropped ones included`,
+          browser: `<script type="module">\n  import { rollDice } from "https://esm.sh/rollatom@1";\n\n  console.log(rollDice(${literal}).total);\n<\/script>`,
+          explain: `import { explainDice, validateDice } from "rollatom";\n\nvalidateDice(${literal});  // null, or the DiceError with its code and index\nexplainDice(${literal});   // the lines under the field above`,
+        };
+        const LABELS = { npm: "npm", browser: "Script tag", explain: "Validate and explain" };
+
+        const head = el("div", "caption");
+        const tabs = el("div", "tabs");
+        for (const key of Object.keys(SNIPPETS)) {
+          const tab = quiet(LABELS[key], () => {
+            snippet = key;
+            showCode(notation);
+            code.querySelector('[aria-pressed="true"]').focus();
+          });
+          tab.setAttribute("aria-pressed", String(key === snippet));
+          tabs.append(tab);
+        }
+        tabs.append(quiet("Copy", (event) => copy(event.currentTarget, SNIPPETS[snippet])));
+        head.append(el("h2", null, "This formula in code"), tabs);
+        code.replaceChildren(head, el("pre", null, SNIPPETS[snippet]));
+      }
+
+      // ── History ────────────────────────────────────────────────────────────
+
+      const KEPT_ROLLS = 10;
+      const rolls = [];
+
+      function remember(rolled) {
+        rolls.unshift({ rolled, seed: seed() });
+        rolls.length = Math.min(rolls.length, KEPT_ROLLS);
+
+        const list = el("ol");
+        for (const entry of rolls) {
+          const row = el("button");
+          row.type = "button";
+          const shown = entry.rolled.labels ?? entry.rolled.values;
+          row.append(el("b", null, String(entry.rolled.total)), el("span", null, `${entry.rolled.notation}  [${shown.join(", ")}]`));
+          row.addEventListener("click", () => {
+            field.value = entry.rolled.notation;
+            seedField.value = entry.seed;
+            showSeedHint();
+            check(true);
+            last = entry.rolled;
+            render(entry.rolled);
+            if (!dist.hidden) markLast();
+          });
+          const item = el("li");
+          item.append(row);
+          list.append(item);
+        }
+        log.replaceChildren(el("p", "hint", "Click a roll to bring it back."), list);
+        log.hidden = false;
+        $("history-panel").hidden = false;
+        $("history-count").textContent = `(${rolls.length})`;
+      }
+
+      // ── Guide ──────────────────────────────────────────────────────────────
+
+      for (const [title, examples] of GUIDE) {
+        const group = el("details", "guide-group");
+        group.open = title === "Basics";
+        group.dataset.title = title;
+        group.append(el("summary", null, title));
+        const chips = el("div", "guide-examples");
+        for (const [example, explanation] of examples) {
+          const chip = el("button", "chip", example);
+          chip.type = "button";
+          chip.title = explanation;
+          chip.addEventListener("click", () => {
+            load(example);
+            explain.textContent = explanation;
+          });
+          const item = el("div", "guide-example");
+          item.append(chip, el("p", null, explanation));
+          chips.append(item);
+        }
+        group.append(chips);
+        $("guide").append(group);
+      }
+
+      let guideOpenState;
+      $("guide-search").addEventListener("input", (event) => {
+        const query = event.target.value.trim().toLowerCase();
+        const groups = [...document.querySelectorAll(".guide-group")];
+        if (query && !guideOpenState) guideOpenState = groups.map((group) => group.open);
+        let matches = 0;
+        groups.forEach((group, index) => {
+          let shown = 0;
+          for (const example of group.querySelectorAll(".guide-example")) {
+            example.hidden = !`${group.dataset.title} ${example.textContent}`.toLowerCase().includes(query);
+            if (!example.hidden) shown += 1;
+          }
+          group.hidden = shown === 0;
+          group.open = query ? shown > 0 : guideOpenState?.[index] ?? group.open;
+          matches += shown;
+        });
+        if (!query) guideOpenState = undefined;
+        $("guide-empty").hidden = matches > 0;
+      });
+
+      for (const [name, color] of Object.entries(DEFAULT_PALETTE)) {
+        const chip = el("button", "chip");
+        chip.type = "button";
+        const swatch = el("span", "swatch");
+        swatch.style.background = color;
+        chip.append(swatch, `#${name}`);
+        chip.addEventListener("click", () => {
+          const at = field.selectionStart ?? field.value.length;
+          field.setRangeText(`{#${name}}`, at, field.selectionEnd ?? at, "end");
+          field.focus();
+          check();
+        });
+        const item = el("li");
+        item.append(chip);
+        $("palette").append(item);
+      }
+
+      {
+        const header = el("tr");
+        header.append(el("th", null, "Roll"), el("th", null, "Elsewhere"), el("th", null, "Here"));
+        $("translations").append(header);
+        for (const { roll: what, theirs, ours } of TRANSLATIONS) {
+          const chip = el("button", "chip", ours);
+          chip.type = "button";
+          chip.addEventListener("click", () => load(ours));
+          const here = el("td");
+          here.append(chip);
+          const row = el("tr");
+          row.append(el("td", null, what), el("td", null, theirs), here);
+          row.children[0].style.fontFamily = "inherit";
+          $("translations").append(row);
+        }
+      }
+
+      // ── Start ──────────────────────────────────────────────────────────────
+
+      // Measured from the module this page actually loaded, so the figure cannot go stale.
+      (async () => {
+        try {
+          const served = await (await fetch(new URL("./rollatom.js", import.meta.url))).blob();
+          const zipped = await new Response(served.stream().pipeThrough(new CompressionStream("gzip"))).blob();
+          const kB = (bytes) => `${(bytes / 1024).toFixed(1)} kB`;
+          $("weight").textContent = `One file, no dependencies: ${kB(served.size)} unminified, ${kB(zipped.size)} gzipped. Measured from the copy this page loaded.`;
+        } catch {
+          // The sentence already in the page stands.
+        }
+      })();
+
+      window.addEventListener("hashchange", () => {
+        if (readLink()) {
+          showSeedHint();
+          roll();
+        }
+      });
+
+      readLink();
+      showSeedHint();
+      roll();
     </script>
   </body>
 </html>
