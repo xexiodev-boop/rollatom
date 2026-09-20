@@ -672,3 +672,5 @@ What that covers:
 
 Additions are minor releases: new grammar, new optional result fields, new optional `RollOptions`.
 A formula that stops rolling, or a result that changes shape, is a bug.
+
+[CHANGELOG.md](CHANGELOG.md) lists what changed in each release.
