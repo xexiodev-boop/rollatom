@@ -27,20 +27,32 @@ async function probe() {
   }
 
   const api = await import("rollatom");
-  for (const name of ["rollDice", "validateDice", "DiceError", "DEFAULT_PALETTE", "LIMITS"]) {
+  for (const name of ["rollDice", "compileDice", "validateDice", "explainDice", "DiceError", "DEFAULT_PALETTE", "LIMITS"]) {
     assert.ok(api[name] !== undefined, `the package does not export ${name}`);
   }
-  const { rollDice, validateDice, DiceError } = api;
+  const { rollDice, compileDice, validateDice, DiceError } = api;
 
   assert.equal(rollDice("2d6", { random: () => 1 }).total, 2);
   assert.equal(validateDice("4d6dl1"), null);
   assert.ok(validateDice("2d6x") instanceof DiceError);
+  assert.equal(validateDice("2d6x").code, "syntax");
+  assert.equal(validateDice("101d6").code, "limit-draws");
 
   // No `random`, so this is the Web Crypto path.
   const rolled = rollDice("2d20kh1 + 5");
   assert.ok(rolled.total >= 6 && rolled.total <= 25, `2d20kh1 + 5 gave ${rolled.total}`);
   assert.equal(rolled.faces.length, 3, "both d20s and the constant");
   assert.equal(rolled.faces.filter((face) => face.dropped).length, 1);
+
+  // A compiled formula holds no dice between rolls: each roll draws from the stream it is given.
+  const compiled = compileDice("2d6");
+  assert.equal(compiled.notation, "2d6");
+  assert.equal(compiled.roll({ random: () => 1 }).total, 2);
+  assert.equal(compiled.roll({ random: (faces) => faces }).total, 12);
+  assert.equal(compiled.roll({ random: () => 1 }).total, 2);
+  assert.throws(() => compileDice("2d6x"), (error) => error instanceof DiceError && error.code === "syntax");
+
+  assert.deepEqual(api.explainDice("4d6dl1"), ["Roll 4d6, drop the lowest.", "The total is the sum of the faces kept."]);
 
   return resolved;
 }

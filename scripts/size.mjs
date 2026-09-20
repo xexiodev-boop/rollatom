@@ -3,7 +3,7 @@
 import { readFileSync, statSync } from "node:fs";
 import { brotliCompressSync, gzipSync } from "node:zlib";
 
-const BUDGET = { raw: 40 * 1024, gzip: 11 * 1024 };
+const BUDGET = { raw: 48 * 1024, gzip: 14 * 1024 };
 
 const FILE = new URL("../dist/index.js", import.meta.url);
 try {

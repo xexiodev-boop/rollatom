@@ -448,7 +448,9 @@ the outermost scale next to the total so a renderer can show it.
   insignificant, `2d6 ko - 1` both mean `ko(−1)`, never a subtraction.
 
 Every error above is raised while reading the formula, so it carries the offset of the character it
-is about: see [Where the error is](../README.md#where-the-error-is).
+is about and a code naming the rule it broke: see
+[Where the error is](../README.md#where-the-error-is) and
+[Error codes](../README.md#error-codes).
 
 ## Limits and safety
 
@@ -464,6 +466,9 @@ LIMITS.draws; // 100    LIMITS.operands; // 20
 LIMITS.chain; // 50     LIMITS.faces;    // 100
 LIMITS.length; // 200   LIMITS.value;    // 1000
 ```
+
+Each cap has a `limit-` error code named after its key, so a rejection says which one it hit
+without the caller reading the message (see [Error codes](../README.md#error-codes)).
 
 - **Total dice rolled** across a formula ≤ 100, **counting every draw**, including base dice,
   explosion rolls, and rerolls alike. Exceeding it is an error, not a truncation. The **base**

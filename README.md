@@ -21,7 +21,10 @@ rollDice("(1d12{'hope'} + 1d12{'fear'})i");  // two named d12s, listed individua
 ```
 
 There is a [playground](https://xexiodev-boop.github.io/rollatom/) for trying formulas: it
-validates as you type and rolls in the page.
+explains a formula in English as you type, rolls it in the page, and charts 10,000 rolls of it. A
+formula travels in the link, so
+[`#f=4d6dl1`](https://xexiodev-boop.github.io/rollatom/#f=4d6dl1) opens on that roll, and adding
+`&seed=…` makes it the same roll for everyone who follows it.
 
 RollAtom ships as ES modules only; there is no CommonJS build. `require("rollatom")` works all
 the same on Node 20.19 and later, which can `require()` an ES module; earlier versions need
@@ -47,6 +50,7 @@ or `null`.
 - [Installing without npm](#installing-without-npm)
 - [Calling the engine](#calling-the-engine)
   - [Where the error is](#where-the-error-is)
+  - [Error codes](#error-codes)
 - [Reading the result](#reading-the-result)
   - [A face](#a-face)
   - [Names, subtotals, and modes](#names-subtotals-and-modes)
@@ -55,6 +59,8 @@ or `null`.
   - [Custom random source](#custom-random-source)
   - [Colors](#colors)
 - [Validating without rolling](#validating-without-rolling)
+- [Rolling one formula many times](#rolling-one-formula-many-times)
+- [Explaining a formula](#explaining-a-formula)
 - [Versioning](#versioning)
 
 ## Why RollAtom?
@@ -167,30 +173,31 @@ first: several spellings parse cleanly here and mean something different.
 The published package is one ES module that imports nothing, so it also runs straight from a URL
 or from a copy inside your own tree. Every route below loads the same file.
 
-That file is the whole library: 33.5 kB, 9.3 kB gzipped, 8.1 kB Brotli, measured 2026-09-20 on the
+That file is the whole library: 43.2 kB, 12.3 kB gzipped, 10.7 kB Brotli, measured 2026-09-20 on the
 current build. It is the compiler's output, not minified, so a bundler will take it further —
-12.5 kB minified, 4.4 kB gzipped with rolldown 1.2.1. `npm run build && npm run size` reprints the
-first three, and CI fails the build if they pass a budget.
+16.5 kB minified, 6.0 kB gzipped (`rolldown dist/index.js --minify --format esm`, rolldown 1.2.1).
+`npm run build && npm run size` reprints the first three, and CI fails the build if they pass a
+budget.
 
 **From a CDN.** Any npm-backed CDN serves the built module. Pin the version, so a later release
 cannot change what the page loads:
 
 ```html
 <script type="module">
-  import { rollDice } from "https://esm.sh/rollatom@1.0.0";
+  import { rollDice } from "https://esm.sh/rollatom@1.1.0";
 
   console.log(rollDice("2d20kh1 + 5").total);
 </script>
 ```
 
-`https://cdn.jsdelivr.net/npm/rollatom@1.0.0/dist/index.js` and
-`https://unpkg.com/rollatom@1.0.0/dist/index.js` serve the same module.
+`https://cdn.jsdelivr.net/npm/rollatom@1.1.0/dist/index.js` and
+`https://unpkg.com/rollatom@1.1.0/dist/index.js` serve the same module.
 
 **Through an import map**, when application code should keep writing the bare name:
 
 ```html
 <script type="importmap">
-  { "imports": { "rollatom": "https://esm.sh/rollatom@1.0.0" } }
+  { "imports": { "rollatom": "https://esm.sh/rollatom@1.1.0" } }
 </script>
 <script type="module">
   import { rollDice } from "rollatom";
@@ -202,10 +209,10 @@ leaves nothing to resolve; keep `dist/index.d.ts` beside it for types. A TypeScr
 copy `src/index.ts` instead and compile it with everything else, which is also the way to build
 the library without installing anything: the file needs no plugins and no build step of its own.
 
-**In Deno**, `npm:rollatom@1.0.0` and the esm.sh URL both resolve:
+**In Deno**, `npm:rollatom@1.1.0` and the esm.sh URL both resolve:
 
 ```ts
-import { rollDice } from "npm:rollatom@1.0.0";
+import { rollDice } from "npm:rollatom@1.1.0";
 ```
 
 Whatever the route, the runtime must provide `crypto.getRandomValues`, or a `random` function has
@@ -233,7 +240,9 @@ try {
 }
 ```
 
-Branch on `instanceof DiceError`, never on the message text ([Versioning](#versioning)).
+Branch on `instanceof DiceError` to separate a rejected formula from a real failure, and on
+[`error.code`](#error-codes) to tell one rejection from another. Never on the message text
+([Versioning](#versioning)).
 
 Errors fall into two groups, and the split decides where a caller has to handle them:
 
@@ -244,6 +253,14 @@ Errors fall into two groups, and the split decides where a caller has to handle 
 
 An input field can therefore call [`validateDice`](#validating-without-rolling) on every keystroke
 and still needs a `try` around `rollDice` ([Limits and safety](docs/GRAMMAR.md#limits-and-safety)).
+
+**The same formula gives a different result every call.** The default source is a CSPRNG. Pass
+`random` to replay a roll ([Custom random source](#custom-random-source)); for a given formula the
+draw order is fixed ([Determinism](docs/GRAMMAR.md#determinism)), so a recorded seed reproduces the roll exactly.
+
+**For server-authoritative rolls**, call `rollDice` in the trusted environment and send the result
+to clients. A `NotationResult` is plain data: it survives `JSON.stringify` and `JSON.parse`
+unchanged, and carries everything a renderer needs, so a client never re-parses or re-rolls.
 
 ### Where the error is
 
@@ -277,13 +294,41 @@ It is `undefined` for the failures no single character causes: the formula-wide 
 (`60d6 + 60d6` counts base dice across every block), the length cap, and the caps only a roll can
 reach. Treat it as absent-by-default and the caret as an enhancement.
 
-**The same formula gives a different result every call.** The default source is a CSPRNG. Pass
-`random` to replay a roll ([Custom random source](#custom-random-source)); for a given formula the
-draw order is fixed ([Determinism](docs/GRAMMAR.md#determinism)), so a recorded seed reproduces the roll exactly.
+### Error codes
 
-**For server-authoritative rolls**, call `rollDice` in the trusted environment and send the result
-to clients. A `NotationResult` is plain data: it survives `JSON.stringify` and `JSON.parse`
-unchanged, and carries everything a renderer needs, so a client never re-parses or re-rolls.
+Every `DiceError` also carries a **`code`** of type `DiceErrorCode`, naming the rule the formula
+broke. The code is covered by the contract and the message is not, so a caller that has to tell one
+rejection from another branches on `code` and displays `message`:
+
+```ts
+const error = validateDice(notation);
+if (error?.code === "limit-draws") showDiceCounter();
+```
+
+| Code | Raised when | Example |
+|---|---|---|
+| `syntax` | the formula is not well-formed | `6d6kh3!` |
+| `unknown-color` | a `#name` the palette does not define | `2d6{#chartreuse}` |
+| `dead-trigger` | an explosion or reroll threshold no face can meet | `d6!o7` |
+| `endless-trigger` | an unbounded explosion or reroll every face meets | `d6!o1` |
+| `limit-draws` | more dice than `LIMITS.draws` | `60d6 + 60d6` |
+| `limit-chain` | one face chained past `LIMITS.chain` | `1d6!` |
+| `limit-length` | a formula longer than `LIMITS.length` | -- |
+| `limit-operands` | more operands than `LIMITS.operands` | -- |
+| `limit-faces` | a face list outside 2 to `LIMITS.faces` faces | `d[1..102]` |
+| `limit-value` | a magnitude past `LIMITS.value` | `1d6 + 1001` |
+| `result-too-large` | a sum past the integers a number holds exactly | `(((((1000)sx1000)sx1000)sx1000)sx1000)sx1000` |
+| `invalid-roll` | a custom `random` returned outside `[1, faceCount]` | -- |
+
+Each `limit-` code names the [`LIMITS`](docs/GRAMMAR.md#limits-and-safety) key it enforces, so an
+input field can show the right counter without reading the message. Three rows need more than a
+formula: two need one longer than this table, and `invalid-roll` needs a broken `random`. `1d6!`
+reaches the chain cap only on a roll where every die comes up 6.
+
+A code is not a message. `0d6` and `101d6` both say *Too many dice*, but the first is `syntax` --
+a count must be at least 1 -- and the second is `limit-draws`. A minor release may split a code in
+two when a rejection earns one of its own, so treat an unfamiliar code as a rejection you have no
+special handling for rather than switching exhaustively.
 
 ## Reading the result
 
@@ -461,7 +506,8 @@ Options are supplied per call. RollAtom has no mutable global configuration.
 ### Custom random source
 
 The default generator uses `crypto.getRandomValues()` with rejection sampling to avoid modulo
-bias. It does not use `Math.random()`.
+bias. It does not use `Math.random()`. Entropy is requested in batches of 64 words rather than
+once per draw, so a pool of unused random words outlives the roll that filled it.
 
 A custom generator can wrap another cryptographic library, a seeded generator, hardware, or
 prefetched remote randomness:
@@ -550,13 +596,100 @@ chain cap on a single face, and a seal or total that nested scales push past the
 holds exactly ([Limits and safety](docs/GRAMMAR.md#limits-and-safety)). Calling `validateDice`
 first does not remove the need to handle `DiceError` from `rollDice`.
 
+## Rolling one formula many times
+
+`compileDice` parses a formula once and hands back something you can roll repeatedly. Use it for a
+macro a character sheet rolls every turn, or a loop sampling the same notation:
+
+```ts
+import { compileDice } from "rollatom";
+
+const attack = compileDice("2d20kh1 + 5");
+
+attack.roll().total;  // a fresh roll
+attack.roll().total;  // another, from the same parse
+attack.notation;      // "2d20kh1 + 5"
+```
+
+`compileDice(notation, options?).roll()` returns exactly what `rollDice(notation, options?)`
+returns; the only thing shared between rolls is the parse. A compiled formula keeps no dice
+between rolls, so one instance is safe to store on a character sheet and roll for as long as it
+lives.
+
+**A rejected formula throws from `compileDice`, not from `roll`.** Compiling runs the same parse
+phase as [`validateDice`](#validating-without-rolling) and raises the same `DiceError`, so the
+static errors move to compile time while the roll-time ones stay on each `roll`:
+
+```ts
+compileDice("6d6kh3!");  // throws DiceError: Invalid notation
+```
+
+Options split along the same line. `palette` is read when the formula is compiled, since `#name`
+must resolve to a color before the tree is kept; `random` and `autoColor` are roll-time, and the
+ones given to `compileDice` become defaults each `roll` may override:
+
+```ts
+const macro = compileDice("2d6{'pip', #brand}", { palette: { brand: "#7950f2" } });
+
+macro.roll();                                                       // the default CSPRNG
+macro.roll({ random: (faces) => myRandom.uniformInteger(1, faces) });  // a source of your own
+```
+
+Because `palette` is already fixed, `roll` takes `CompiledRollOptions` -- `RollOptions` without
+it. Reach for `rollDice` for a formula rolled once: it is `compileDice(...).roll()` and costs the
+same. `compileDice` pays off from the second roll on.
+
+## Explaining a formula
+
+`explainDice` says in English what a formula does, for a tooltip beside an input field or a help
+panel for players who have not learned the notation. It returns one line per step, in the order
+the roll performs them:
+
+```ts
+import { explainDice } from "rollatom";
+
+explainDice("4d6dl1");
+// Roll 4d6, drop the lowest.
+// The total is the sum of the faces kept.
+```
+
+What the notation leaves unwritten is spelled out: a bare `kh` keeps one, the default trigger of an
+explosion is the die's highest face, and a formula with no final operator is summed. A group's
+steps are indented two spaces under its heading, so the lines can be joined with newlines or
+rendered as a nested list:
+
+```ts
+explainDice("(1d8* + 1d6*)kh1");
+// Roll a group:
+//   Roll 1d8, explode on 8, the highest face (extra rolls add into the same die while they keep triggering).
+//   Add 1d6, explode on 6, the highest face (extra rolls add into the same die while they keep triggering).
+//   Across the group, keep the highest.
+// The total is the sum of the faces kept.
+```
+
+A final operator on the whole formula reads as the total; anywhere else it is a seal
+([Open vs sealed operands](docs/GRAMMAR.md#open-vs-sealed-operands)), and says so:
+
+```ts
+explainDice("2d8sx2 + 3");
+// Roll 2d8, collapse to one face worth the sum, times 2.
+// Add 3.
+// The total is the sum of the faces.
+```
+
+Like `compileDice`, it runs the parse phase and nothing else: it draws no dice, reads only
+`palette` from its options, and throws the `DiceError` `validateDice` would return. **The wording
+is for people, not programs.** It is English only and may be reworded in any release, exactly like
+`DiceError.message`; do not match against it.
+
 ## Versioning
 
 RollAtom follows semantic versioning from 1.0.0. The contract is the set of exports this document
-describes -- `rollDice`, `validateDice`, `DiceError`, `LIMITS`, `DEFAULT_PALETTE`, and the
-`NotationResult`, `NotationFace`, `NotationSubtotal`, `NotationScale`, `RollOptions`, `Limits`, and
-`RandomInt` types -- together with the grammar itself. A formula that rolls under 1.0 keeps rolling
-under every later 1.x, and keeps the same shape of result.
+describes -- `rollDice`, `compileDice`, `validateDice`, `explainDice`, `DiceError`, `LIMITS`, `DEFAULT_PALETTE`,
+and the `NotationResult`, `NotationFace`, `NotationSubtotal`, `NotationScale`, `RollOptions`,
+`CompiledDice`, `CompiledRollOptions`, `Limits`, `DiceErrorCode`, and `RandomInt` types --
+together with the grammar itself. A formula that rolls
+under 1.0 keeps rolling under every later 1.x, and keeps the same shape of result.
 
 Three clarifications on what that covers:
 
@@ -568,11 +701,12 @@ Three clarifications on what that covers:
   [Determinism](docs/GRAMMAR.md#determinism): a given formula draws from `random` in the same order, so a recorded
   seed replays to the same roll.
 - **ES modules only is part of the promise.** There is no CommonJS build, and 1.x will not add one.
-- **`DiceError` message text is not covered.** Which formulas are rejected is part of the grammar
-  and will not change within 1.x, but the wording explaining why may be sharpened in any release.
-  Branch on `instanceof DiceError`, never on the message string.
-  The same applies to a `DiceError`'s `index`: that a positional error *has* one is covered, but
-  the exact offset may move as messages are sharpened. It is for drawing a caret, not comparing.
+- **`DiceError` message text is not covered, but its [`code`](#error-codes) is.** Which formulas
+  are rejected is part of the grammar and will not change within 1.x, and neither does the code a
+  rejection carries; the wording explaining why may be sharpened in any release. Branch on `code`,
+  never on the message string. The same applies to a `DiceError`'s `index`: that a positional error
+  *has* one is covered, but the exact offset may move as messages are sharpened. It is for drawing
+  a caret, not comparing.
 
 Additions are minor releases: new grammar that was previously a `DiceError`, new optional fields on
 the result, new optional `RollOptions`. If a formula that rolled correctly stops rolling, or its

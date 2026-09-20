@@ -14,12 +14,15 @@ try {
 }
 
 const WORKER = `
-  import { rollDice, validateDice } from "./rollatom.js";
+  import { rollDice, compileDice, validateDice } from "./rollatom.js";
+  const compiled = compileDice("2d6");
   postMessage({
     seeded: rollDice("2d6", { random: () => 1 }).total,
     total: rollDice("2d20kh1 + 5").total,
     faces: rollDice("2d20kh1 + 5").faces.length,
     index: validateDice("2d6x").index,
+    code: validateDice("101d6").code,
+    reused: [1, 6, 1].map((face) => compiled.roll({ random: () => face }).total).join(),
   });
 `;
 
@@ -64,7 +67,7 @@ try {
   }
 
   if (rolled) {
-    const expected = { seeded: 2, faces: 3, index: 3 };
+    const expected = { seeded: 2, faces: 3, index: 3, code: "limit-draws", reused: "2,12,2" };
     for (const [key, value] of Object.entries(expected)) {
       if (rolled[key] !== value) failures.push(`${key} was ${rolled[key]}, expected ${value}`);
     }

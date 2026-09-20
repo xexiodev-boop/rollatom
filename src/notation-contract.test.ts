@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import fc from "fast-check";
-import { DiceError, rollDice, validateDice, type NotationResult } from "./index";
+import { compileDice, DiceError, explainDice, rollDice, validateDice, type DiceErrorCode, type NotationResult } from "./index";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Property-based contract tests for RollAtom. Generated formulas and RNG streams exercise
@@ -17,10 +17,26 @@ const rngFrom = (stream: number[]) => {
 
 const seedArb = fc.array(fc.nat({ max: 1 << 30 }), { minLength: 40, maxLength: 40 });
 
+// `dice-notation.test.ts` pins an example to each of these; here they bound what may be thrown.
+const CODES = [
+  "syntax",
+  "unknown-color",
+  "dead-trigger",
+  "endless-trigger",
+  "limit-draws",
+  "limit-chain",
+  "limit-length",
+  "limit-operands",
+  "limit-faces",
+  "limit-value",
+  "result-too-large",
+  "invalid-roll",
+] as const satisfies readonly DiceErrorCode[];
+
 // Generated formulas: canonical block order (count · d · faces · ops · filters · final),
-// joined with +/-. Triggerless explosions and in-range thresholds keep every generated
-// formula statically valid; the engine's own caps (draws, chain) may still throw DiceError
-// mid-roll, which the properties treat as a legal outcome.
+// joined with +/-. Most are statically valid, but not all: an until-reroll can outrun a
+// narrow face list (`1d[0x3,1x3]rru2` is an endless trigger), and the engine's own caps
+// (draws, chain) may throw mid-roll. The properties treat both as legal outcomes.
 const blockArb = fc
   .record({
     count: fc.integer({ min: 1, max: 6 }),
@@ -45,13 +61,17 @@ const formulaArb = fc
   });
 
 // Rolls, treating the engine's runtime caps as a legal (skipped) outcome.
-function tryRoll(formula: string, stream: number[]): NotationResult | undefined {
+function attempt(roll: () => NotationResult): NotationResult | undefined {
   try {
-    return rollDice(formula, { random: rngFrom(stream) });
+    return roll();
   } catch (error) {
     if (error instanceof DiceError) return undefined;
     throw error;
   }
+}
+
+function tryRoll(formula: string, stream: number[]): NotationResult | undefined {
+  return attempt(() => rollDice(formula, { random: rngFrom(stream) }));
 }
 
 describe("engine contract (properties)", () => {
@@ -138,6 +158,23 @@ describe("engine contract (properties)", () => {
           rollDice(input, { random: rngFrom(stream) });
         } catch (error) {
           expect(error).toBeInstanceOf(DiceError);
+          // The field callers are told to branch on is always there to branch on.
+          expect(CODES).toContain((error as DiceError).code);
+        }
+      }),
+    );
+  });
+
+  it("reports the same code whether the formula was validated or rolled", () => {
+    fc.assert(
+      fc.property(fc.oneof(formulaArb, fc.string({ maxLength: 60 })), seedArb, (input, stream) => {
+        const error = validateDice(input);
+        if (!error) return;
+        try {
+          rollDice(input, { random: rngFrom(stream) });
+          expect.unreachable("a statically rejected formula rolled");
+        } catch (thrown) {
+          expect((thrown as DiceError).code).toBe(error.code);
         }
       }),
     );
@@ -174,7 +211,7 @@ describe("engine contract (properties)", () => {
   it("validateDice accepts exactly what survives the parse phase, whatever the input string", () => {
     // The caps a roll can still hit after a formula validates: they depend on the dice, not the
     // text, so they are the only failures `validateDice` is allowed to miss.
-    const runtimeCaps = ["Too many dice", "Explosion limit reached", "Reroll limit reached"];
+    const runtimeCaps: DiceErrorCode[] = ["limit-draws", "limit-chain"];
     fc.assert(
       fc.property(fc.oneof(formulaArb, fc.string({ maxLength: 60 })), seedArb, (input, stream) => {
         const error = validateDice(input);
@@ -187,7 +224,53 @@ describe("engine contract (properties)", () => {
         try {
           rollDice(input, { random: rngFrom(stream) });
         } catch (thrown) {
-          expect(runtimeCaps).toContain((thrown as DiceError).message);
+          expect(runtimeCaps).toContain((thrown as DiceError).code);
+        }
+      }),
+    );
+  });
+
+  it("a compiled formula rolls what rollDice rolls, however often it is reused", () => {
+    fc.assert(
+      fc.property(formulaArb, fc.array(seedArb, { minLength: 3, maxLength: 3 }), (formula, streams) => {
+        if (validateDice(formula)) return; // statically rejected; the property below covers those
+        const compiled = compileDice(formula);
+        const reused = streams.map((stream) => attempt(() => compiled.roll({ random: rngFrom(stream) })));
+
+        expect(reused).toEqual(streams.map((stream) => tryRoll(formula, stream)));
+      }),
+    );
+  });
+
+  it("compileDice accepts exactly what validateDice accepts, and reports the same error", () => {
+    fc.assert(
+      fc.property(fc.oneof(formulaArb, fc.string({ maxLength: 60 })), (input) => {
+        const error = validateDice(input);
+        try {
+          compileDice(input);
+          expect(error).toBeNull();
+        } catch (thrown) {
+          expect(thrown).toBeInstanceOf(DiceError);
+          expect((thrown as DiceError).code).toBe(error?.code);
+          expect((thrown as DiceError).index).toBe(error?.index);
+        }
+      }),
+    );
+  });
+
+  it("explainDice explains exactly what validateDice accepts, and reports the same error", () => {
+    fc.assert(
+      fc.property(fc.oneof(formulaArb, fc.string({ maxLength: 60 })), (input) => {
+        const error = validateDice(input);
+        try {
+          const lines = explainDice(input);
+          expect(error).toBeNull();
+          expect(lines.length).toBeGreaterThanOrEqual(2);
+          for (const line of lines) expect(line).toMatch(/^(?: {2})*[A-Z].*[.:]$/);
+        } catch (thrown) {
+          expect(thrown).toBeInstanceOf(DiceError);
+          expect((thrown as DiceError).code).toBe(error?.code);
+          expect((thrown as DiceError).index).toBe(error?.index);
         }
       }),
     );

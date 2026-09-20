@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DiceError, LIMITS, rollDice, validateDice } from "./index";
+import { compileDice, DiceError, explainDice, LIMITS, rollDice, validateDice, type DiceErrorCode, type RandomInt } from "./index";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Executable specification for the universal dice grammar (see `docs/GRAMMAR.md`),
@@ -972,5 +972,226 @@ describe("error position", () => {
   it("is a DiceError by name, so a caught error reads as one", () => {
     expect(validateDice("6d6kh3!")!.name).toBe("DiceError");
     expect(String(validateDice("6d6kh3!"))).toBe("DiceError: Invalid notation");
+  });
+});
+
+describe("error codes", () => {
+  const code = (input: string) => validateDice(input)?.code;
+
+  const thrown = (input: string, random?: RandomInt): DiceError => {
+    try {
+      rollDice(input, random ? { random } : {});
+    } catch (error) {
+      return error as DiceError;
+    }
+    expect.unreachable(`${input} rolled`);
+  };
+
+  // A `Record` over the union: a code added without an example here does not compile.
+  const REACHED: Record<DiceErrorCode, () => DiceError> = {
+    syntax: () => thrown("6d6kh3!"),
+    "unknown-color": () => thrown("2d6{#chartreuse}"),
+    "dead-trigger": () => thrown("d6!o7"),
+    "endless-trigger": () => thrown("d6!o1"),
+    "limit-draws": () => thrown("60d6 + 60d6"),
+    "limit-chain": () => thrown("1d6!", () => 6),
+    "limit-length": () => thrown("1".repeat(LIMITS.length + 1)),
+    "limit-operands": () => thrown("1+".repeat(LIMITS.operands + 1) + "1"),
+    "limit-faces": () => thrown(`d[1..${LIMITS.faces + 2}]`),
+    "limit-value": () => thrown(`1d6 + ${LIMITS.value + 1}`),
+    "result-too-large": () => thrown("(((((1000)sx1000)sx1000)sx1000)sx1000)sx1000"),
+    "invalid-roll": () => thrown("1d6", () => 0),
+  };
+
+  it("every code is reachable", () => {
+    for (const [expected, reach] of Object.entries(REACHED)) expect(reach().code).toBe(expected);
+  });
+
+  it("names the rule broken, so one message can carry two codes", () => {
+    expect(thrown("0d6").message).toBe(thrown("101d6").message);
+    expect([code("0d6"), code("101d6")]).toEqual(["syntax", "limit-draws"]);
+
+    expect(thrown("d[1 2]").message).toBe(thrown("d[1..102]").message);
+    expect([code("d[1 2]"), code("d[1..102]")]).toEqual(["syntax", "limit-faces"]);
+  });
+
+  it("uses one code for a cap, whichever phase reaches it", () => {
+    // `60d6 + 60d6` passes the draw cap before rolling; `60d6!!` only once it explodes.
+    expect(code("60d6 + 60d6")).toBe("limit-draws");
+    expect(code("60d6!!")).toBeUndefined();
+    expect(thrown("60d6!!", () => 6).code).toBe("limit-draws");
+  });
+
+  it("separates a dead trigger from one that would never stop", () => {
+    expect([code("d6!o7"), code("d6rru0")]).toEqual(["dead-trigger", "dead-trigger"]);
+    expect([code("d6!o1"), code("d6rru6")]).toEqual(["endless-trigger", "endless-trigger"]);
+  });
+
+  it("carries the same code whether the formula was rolled or validated", () => {
+    for (const bad of ["6d6kh3!", "d6!o7", "2d6{#chartreuse}", "60d6 + 60d6", "1d6 + 1001"])
+      expect(thrown(bad).code).toBe(code(bad));
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// `compileDice` - the parse phase kept, so one formula can be rolled many times.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("compileDice", () => {
+  it("reports the formula trimmed, as a result does", () => {
+    expect(compileDice("  2d6 + 1  ").notation).toBe("2d6 + 1");
+  });
+
+  it("parses once: a rejected formula throws at compile time, before any roll", () => {
+    const noDraws = () => {
+      throw new Error("compileDice drew a die");
+    };
+    expect(() => compileDice("2d6x", { random: noDraws })).toThrow(DiceError);
+    expect(() => compileDice("2d6x", { random: noDraws })).toThrow(
+      expect.objectContaining({ code: "syntax", index: validateDice("2d6x")!.index }),
+    );
+  });
+
+  it("does not draw while compiling", () => {
+    const noDraws = () => {
+      throw new Error("compileDice drew a die");
+    };
+    expect(() => compileDice("100d6!", { random: noDraws })).not.toThrow();
+  });
+
+  it("rolls what rollDice rolls, given the same stream", () => {
+    const formula = "2d20kh1 + 1d6 + 3";
+    const stream = [17, 4, 5];
+    expect(compileDice(formula).roll({ random: seq(...stream) })).toEqual(rollDice(formula, { random: seq(...stream) }));
+  });
+
+  it("keeps no faces between rolls: each roll draws its own", () => {
+    const compiled = compileDice("2d6");
+    expect(compiled.roll({ random: seq(1, 1) }).values).toEqual([1, 1]);
+    expect(compiled.roll({ random: seq(6, 6) }).values).toEqual([6, 6]);
+    expect(compiled.roll({ random: seq(1, 1) }).values).toEqual([1, 1]);
+  });
+
+  it("carries compile-time options as roll defaults, overridable per roll", () => {
+    const compiled = compileDice("2d6", { random: seq(3, 3, 3, 3) });
+    expect(compiled.roll().total).toBe(6);
+    expect(compiled.roll({ random: seq(5, 5) }).total).toBe(10);
+    expect(compiled.roll().total).toBe(6); // the default stream continues where it left off
+  });
+
+  it("resolves color tokens against the palette given at compile time", () => {
+    const compiled = compileDice("2d6{'pip', #brand}", { palette: { brand: "#010203" } });
+    expect(compiled.roll({ random: seq(1, 1) }).subtotals).toEqual([{ label: "pip", total: 2, color: "#010203" }]);
+    expect(() => compileDice("2d6{'pip', #brand}")).toThrow(expect.objectContaining({ code: "unknown-color" }));
+  });
+
+  it("enforces the roll-time caps on every roll, not once", () => {
+    const compiled = compileDice("6d6!");
+    for (let i = 0; i < 3; i += 1) expect(() => compiled.roll({ random: maxFace })).toThrow(DiceError);
+    expect(compiled.roll({ random: seq(1, 1, 1, 1, 1, 1) }).total).toBe(6);
+  });
+
+  it("survives a roll re-entered from inside its own RNG", () => {
+    // A roll that starts while another is mid-flight shares the tree; nothing may cross over.
+    const compiled = compileDice("2d6 + 1d20");
+    const inner: number[] = [];
+    const outer = compiled.roll({
+      random: (faceCount) => {
+        if (faceCount === 20) inner.push(...compiled.roll({ random: seq(6, 6, 20) }).values);
+        return 1;
+      },
+    });
+
+    expect(outer.values).toEqual([1, 1, 1]);
+    expect(inner).toEqual([6, 6, 20]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// `explainDice` - the formula in English, one line per step, in evaluation order.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("explainDice", () => {
+  const SUM = "The total is the sum of the faces.";
+  const SUM_KEPT = "The total is the sum of the faces kept.";
+
+  it("spells out the defaults the notation leaves unwritten", () => {
+    expect(explainDice("2d20kh + 5")).toEqual(["Roll 2d20, keep the highest.", "Add 5.", SUM_KEPT]);
+    expect(explainDice("4d6kh1")).toEqual(explainDice("4d6kh1s"));
+  });
+
+  it("lists operators, then filters, in the order they run", () => {
+    expect(explainDice("6d6!kh3kl1")).toEqual([
+      "Roll 6d6, explode on 6, the highest face (each adds a new die that can explode too), then keep the 3 highest, then keep the lowest.",
+      SUM_KEPT,
+    ]);
+    expect(explainDice("2d6min3**")).toEqual([
+      "Roll 2d6, raise any roll under 3 to 3, then explode once on 6, the highest face (one extra roll adds into the same die).",
+      SUM,
+    ]);
+    expect(explainDice("4d6ro6rh2")[0]).toBe("Roll 4d6, reroll once any showing 6 or more, then reroll the 2 highest once.");
+    expect(explainDice("1d10rru1")[0]).toBe("Roll 1d10, reroll any showing 1 or less until it no longer does.");
+    expect(explainDice("4d6km2du1do6")[0]).toBe(
+      "Roll 4d6, keep the 2 middle, then drop those valued 1 or less, then drop those valued 6 or more.",
+    );
+  });
+
+  it("names the join of every operand after the first", () => {
+    expect(explainDice("10 - 2d4kh1")).toEqual(["Start with 10.", "Subtract 2d4, keep the highest.", SUM_KEPT]);
+    expect(explainDice("-d6")).toEqual(["Subtract 1d6.", SUM]);
+  });
+
+  it("indents a group's steps and states what applies across it", () => {
+    expect(explainDice("(1d8* + 1d6*)kh1")).toEqual([
+      "Roll a group:",
+      "  Roll 1d8, explode on 8, the highest face (extra rolls add into the same die while they keep triggering).",
+      "  Add 1d6, explode on 6, the highest face (extra rolls add into the same die while they keep triggering).",
+      "  Across the group, keep the highest.",
+      SUM_KEPT,
+    ]);
+    expect(explainDice("(1d20 + 1d6)!")[3]).toBe(
+      "  Across the group, explode on each die's highest face (each adds a new die that can explode too).",
+    );
+  });
+
+  it("reads a final on the whole formula as the total, and any other as a seal", () => {
+    expect(explainDice("6d6ko5c")).toEqual(["Roll 6d6, keep those valued 5 or more.", "The total is the number of faces kept."]);
+    expect(explainDice("(2d8+3)s/2")).toEqual([
+      "Roll a group:",
+      "  Roll 2d8.",
+      "  Add 3.",
+      "The total is the sum of the faces, divided by 2 and rounded down.",
+    ]);
+    expect(explainDice("(6d6ko6)c/2u").at(-1)).toBe("The total is the number of faces kept, divided by 2 and rounded up.");
+    expect(explainDice("2d8sx2 + 3")).toEqual(["Roll 2d8, collapse to one face worth the sum, times 2.", "Add 3.", SUM]);
+    expect(explainDice("(1d12{'hope'} + 1d12{'fear'})i").at(-1)).toBe("Each of the faces is listed; the total is their sum.");
+  });
+
+  it("describes a die by its faces", () => {
+    const die = (formula: string) => explainDice(formula)[0];
+    expect(die("4dF")).toBe("Roll 4dF (Fate dice: -1, 0 or +1).");
+    expect(die("d[1..6]")).toBe("Roll 1d6.");
+    expect(die("d[3..6]")).toBe("Roll 1 die with faces 3 to 6.");
+    expect(die("d[10..60:10]")).toBe("Roll 1 die with faces 10 to 60 in steps of 10.");
+    expect(die("10d[-1,0x6,1x3]")).toBe("Roll 10 dice with faces -1, 0 (x6), 1 (x3).");
+    expect(die("4d['cat','dog']")).toBe("Roll 4 dice with faces 'cat'=1, 'dog'=2.");
+  });
+
+  it("reports a name, and the color the roll will resolve for it", () => {
+    expect(explainDice("2d6{#red,'fire'} + 1d8{'fire'}").slice(0, 2)).toEqual([
+      "Roll 2d6 (named 'fire', colored #cc3333).",
+      "Add 1d8 (named 'fire', colored #cc3333).",
+    ]);
+    expect(explainDice("1d6{#brand}", { palette: { brand: "#010203" } })[0]).toBe("Roll 1d6 (colored #010203).");
+  });
+
+  it("throws what validateDice reports, and draws nothing", () => {
+    const noDraws = () => {
+      throw new Error("explainDice drew a die");
+    };
+    expect(() => explainDice("100d6!", { random: noDraws })).not.toThrow();
+    expect(() => explainDice("6d6kh3!")).toThrow(
+      expect.objectContaining({ code: "syntax", index: validateDice("6d6kh3!")!.index }),
+    );
   });
 });
