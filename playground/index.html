@@ -940,13 +940,13 @@
 
       // ── Start ──────────────────────────────────────────────────────────────
 
-      // Measured from the module this page actually loaded, so the figure cannot go stale.
+      // The size of the module this page loaded.
       (async () => {
         try {
           const served = await (await fetch(new URL("./rollatom.js", import.meta.url))).blob();
           const zipped = await new Response(served.stream().pipeThrough(new CompressionStream("gzip"))).blob();
           const kB = (bytes) => `${(bytes / 1024).toFixed(1)} kB`;
-          $("weight").textContent = `One file, no dependencies: ${kB(served.size)} unminified, ${kB(zipped.size)} gzipped. Measured from the copy this page loaded.`;
+          $("weight").textContent = `One file, no dependencies: ${kB(served.size)} unminified, ${kB(zipped.size)} gzipped.`;
         } catch {
           // The sentence already in the page stands.
         }

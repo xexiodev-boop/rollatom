@@ -81,7 +81,7 @@ beside it.
 - **Impossible rolls fail before the dice.** An explosion that can never trigger, or one that could
   never stop, is rejected when the formula is read rather than discovered at the table.
 
-The costs are deliberate. There is no arithmetic beyond the reduction, which may be multiplied or
+What it leaves out: there is no arithmetic beyond the reduction, which may be multiplied or
 divided once at the point the notation names it (`sx2`, `s/2`, `s/3u`); anything further belongs to
 a macro layer. Nothing here knows what a success, a critical, or a degree of failure is. Word order
 is fixed, so `6d6kh3!` is an error rather than a guess and exploding after a keep is written
