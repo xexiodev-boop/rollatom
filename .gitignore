@@ -5,3 +5,6 @@ dist/
 # The playground imports a copy of the built engine; CI makes it at deploy time.
 playground/rollatom.js
 _site/
+
+# Internal instructions for Claude Code; kept local.
+CLAUDE.md
