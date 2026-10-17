@@ -182,20 +182,20 @@ cannot change what the page loads:
 
 ```html
 <script type="module">
-  import { rollDice } from "https://esm.sh/rollatom@1.1.0";
+  import { rollDice } from "https://esm.sh/rollatom@1.2.0";
 
   console.log(rollDice("2d20kh1 + 5").total);
 </script>
 ```
 
-`https://cdn.jsdelivr.net/npm/rollatom@1.1.0/dist/index.js` and
-`https://unpkg.com/rollatom@1.1.0/dist/index.js` serve the same module.
+`https://cdn.jsdelivr.net/npm/rollatom@1.2.0/dist/index.js` and
+`https://unpkg.com/rollatom@1.2.0/dist/index.js` serve the same module.
 
 **Through an import map**, when application code should keep writing the bare name:
 
 ```html
 <script type="importmap">
-  { "imports": { "rollatom": "https://esm.sh/rollatom@1.1.0" } }
+  { "imports": { "rollatom": "https://esm.sh/rollatom@1.2.0" } }
 </script>
 <script type="module">
   import { rollDice } from "rollatom";
@@ -206,10 +206,10 @@ cannot change what the page loads:
 It has no imports, so there is nothing to resolve. A TypeScript project can copy `src/index.ts`
 instead.
 
-**In Deno**, `npm:rollatom@1.1.0` and the esm.sh URL both resolve:
+**In Deno**, `npm:rollatom@1.2.0` and the esm.sh URL both resolve:
 
 ```ts
-import { rollDice } from "npm:rollatom@1.1.0";
+import { rollDice } from "npm:rollatom@1.2.0";
 ```
 
 **In Bun**, `bun add rollatom` installs it from the npm registry, and the module runs unchanged,

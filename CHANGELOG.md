@@ -2,7 +2,7 @@
 
 Changes to the published package. Dates are npm publish dates.
 
-## Unreleased
+## 1.2.0 — 2026-10-17
 
 ### Added
 
