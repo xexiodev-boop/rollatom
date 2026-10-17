@@ -17,7 +17,7 @@ async function probe() {
     assert.equal(error.code, "ERR_REQUIRE_ESM", `require("rollatom") failed with ${error.code}`);
   }
 
-  // DOM globals need no check here: this file runs in Node, where they are already absent. What
+  // DOM globals need no check here: this file runs in Node or Bun, where they are already absent. What
   // running in Node cannot catch is the reverse — a Node-only global, or an import of any kind,
   // which browsers and web workers would reject. Both are claims the README makes.
   const source = readFileSync(new URL(resolved), "utf8");
@@ -27,7 +27,7 @@ async function probe() {
   }
 
   const api = await import("rollatom");
-  for (const name of ["rollDice", "compileDice", "validateDice", "explainDice", "DiceError", "DEFAULT_PALETTE", "LIMITS"]) {
+  for (const name of ["rollDice", "compileDice", "validateDice", "lintDice", "explainDice", "seededRandom", "DiceError", "DEFAULT_PALETTE", "LIMITS"]) {
     assert.ok(api[name] !== undefined, `the package does not export ${name}`);
   }
   const { rollDice, compileDice, validateDice, DiceError } = api;
@@ -53,6 +53,12 @@ async function probe() {
   assert.throws(() => compileDice("2d6x"), (error) => error instanceof DiceError && error.code === "syntax");
 
   assert.deepEqual(api.explainDice("4d6dl1"), ["Roll 4d6, drop the lowest.", "The total is the sum of the faces kept."]);
+
+  // A stored seed replays the same roll on every runtime.
+  assert.deepEqual(
+    rollDice("6d20", { random: api.seededRandom(20261017) }).values,
+    rollDice("6d20", { random: api.seededRandom(20261017) }).values,
+  );
 
   return resolved;
 }

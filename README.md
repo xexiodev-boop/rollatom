@@ -1,3 +1,5 @@
+<p align="center"><img src="playground/logo.png" alt="rollatom logo" width="160" height="160"></p>
+
 # rollatom
 
 A dependency-free dice-notation engine for the web platform. It uses one grammar for rolling
@@ -23,18 +25,20 @@ rollDice("(1d12{'hope'} + 1d12{'fear'})i");  // two named d12s, listed individua
 Try formulas in the [playground](https://xexiodev-boop.github.io/rollatom/). A link can carry
 one: [`#f=4d6dl1`](https://xexiodev-boop.github.io/rollatom/#f=4d6dl1).
 
-RollAtom is ESM-only and runs in current browsers, web workers, and Node 20 or later. The default
+RollAtom is ESM-only and runs in current browsers, web workers, Node 20 or later, and Bun. The default
 RNG needs `crypto.getRandomValues`; where that is missing, pass your own `random`. No package
 manager is required: see [Installing without npm](#installing-without-npm).
 
 `rollDice(notation, options?)` returns a `NotationResult` with the total, surviving values,
 per-face records (dropped dice included, marked), and name-grouped subtotals. `RollOptions`
-configures the `random` source (a CSPRNG by default), the color `palette` for `#name` tokens,
-and `autoColor` for named subtotals. For server-authoritative rolls, call `rollDice` in the
-trusted environment and send its result to clients.
+configures the `random` source (a CSPRNG by default; `seededRandom` gives a reproducible one), the
+color `palette` for `#name` tokens, `autoColor` for named subtotals, the caps in `limits`, and the
+`vars` behind `@name`. For server-authoritative rolls, call `rollDice` in the trusted environment
+and send its result to clients.
 
 `validateDice(notation, options?)` checks a formula without rolling it and returns a `DiceError`
-or `null`.
+or `null`. `lintDice` lists steps that can never change a roll, `explainDice` describes a formula
+in English, and `compileDice` parses a formula once for many rolls.
 
 ## Contents
 
@@ -52,7 +56,10 @@ or `null`.
 - [Configuration](#configuration)
   - [Custom random source](#custom-random-source)
   - [Colors](#colors)
+  - [Limits](#limits)
+  - [Variables](#variables)
 - [Validating without rolling](#validating-without-rolling)
+- [Finding steps that do nothing](#finding-steps-that-do-nothing)
 - [Rolling one formula many times](#rolling-one-formula-many-times)
 - [Explaining a formula](#explaining-a-formula)
 - [Versioning](#versioning)
@@ -137,7 +144,7 @@ and enforced, so `6d6kh3!` is an error; write `(6d6kh3)!`.
 | **Dice** | `NdM`, `d[…]`, `dF` | `4d6`, `d[3..6]`, `d[10..60:10]`, `2d['cat','dog']`, `4dF` |
 | **Appearance** | `{#color,'name'}` | `2d6{#red}`, `2d6{#red,'fire'}` |
 | **Clamp** | `minN`, `maxN` | `4d6min2` |
-| **Explode** | `!` `!!` `*` `**`, optional `oN`/`uN` trigger | `4d6!`, `1d6*`, `4d6!o5` |
+| **Explode** | `!` `!!` `*` `**`, optional `oN` trigger | `4d6!`, `1d6*`, `4d6!o5` |
 | **Reroll** | `r` + `h`/`l`/`o`/`u`, `rr` for until | `4d6ru2`, `4d6rru1`, `4d6rl1` |
 | **Filters** | `k`/`d` + `h`/`l`/`m`/`o`/`u` + N | `4d6dl1`, `2d20kh1`, `6d6ko4` |
 | **Final** | `s`, `c`, `i`, with optional scale | `(2d8+3)s/2`, `6d6ko4c`, `(1d6+1d8)i` |
@@ -150,6 +157,7 @@ The letters compose rather than enumerate:
   exploding die's own seat. Doubling either (`!!`, `**`) limits it to one extra layer.
 - `s` sums, `c` counts the survivors, `i` lists them. A scale rides on `s` and `c`: `xN` multiplies,
   `/N` divides rounding down, `/Nu` divides rounding up.
+- `@name` stands for a number the caller passes in `vars` ([Variables](#variables)).
 
 ```ts
 rollDice("4d6dl1");                  // drop the lowest of four
@@ -167,7 +175,7 @@ first: several spellings parse cleanly here and mean something different.
 The published package is one ES module that imports nothing, so it also runs straight from a URL
 or from a copy inside your own tree. Every route below loads the same file.
 
-That file is 43.2 kB, 12.3 kB gzipped. Minified, it is 16.5 kB, 6.0 kB gzipped.
+That file is 43.2 kB, 10.5 kB gzipped. Minified, it is 22.4 kB, 8.1 kB gzipped.
 
 **From a CDN.** Any npm-backed CDN serves the built module. Pin the version, so a later release
 cannot change what the page loads:
@@ -204,6 +212,9 @@ instead.
 import { rollDice } from "npm:rollatom@1.1.0";
 ```
 
+**In Bun**, `bun add rollatom` installs it from the npm registry, and the module runs unchanged,
+in workers too.
+
 Whatever the route, the runtime must provide `crypto.getRandomValues`, or a `random` function has
 to be supplied per call (see [Configuration](#configuration)). Nothing else is required.
 
@@ -237,8 +248,8 @@ Errors fall into two groups, and the split decides where a caller has to handle 
 
 | Group | Raised | Covers | Caught by `validateDice`? |
 |---|---|---|---|
-| **Static** | at parse time, before a die is drawn | syntax, unknown `#color`, formula length, operand count, `i` placement, impossible and never-halting triggers, and the base dice a formula is certain to roll | Yes |
-| **Roll-time** | mid-roll, as dice are drawn and reduced | the total draw cap, the 50-roll chain cap on a single face, and a result too large to hold exactly | No |
+| **Static** | at parse time, before a die is drawn | syntax, unknown `#color` or `@name`, formula length, operand count, `i` placement, impossible and never-halting triggers, and the base dice a formula is certain to roll | Yes |
+| **Roll-time** | mid-roll, as dice are drawn and reduced | the total draw cap, the chain cap on a single face, and a result too large to hold exactly | No |
 
 An input field can therefore call [`validateDice`](#validating-without-rolling) on every keystroke
 and still needs a `try` around `rollDice` ([Limits and safety](docs/GRAMMAR.md#limits-and-safety)).
@@ -283,6 +294,18 @@ It is `undefined` for the failures no single character causes: the formula-wide 
 (`60d6 + 60d6` counts base dice across every block), the length cap, and the caps only a roll can
 reach. Treat it as absent-by-default and the caret as an enhancement.
 
+A `syntax` error at a character that cannot start a token there also carries **`expected`**: the
+tokens that could stand at `index` instead, for an input field that suggests a fix. Each is a
+token as written (`"+"`, `"kh"`, `")"`) or `"number"`:
+
+```ts
+const error = validateDice("2d6+");
+error?.expected; // ["number", "(", "d", "@"]
+```
+
+It is absent when the error is about a token already read, such as a second explosion or an
+unterminated string, and for every other code. The list may grow in any release.
+
 ### Error codes
 
 Every `DiceError` carries a **`code`**, of type `DiceErrorCode`, naming the rule the formula
@@ -297,15 +320,16 @@ if (error?.code === "limit-draws") showDiceCounter();
 |---|---|---|
 | `syntax` | the formula is not well-formed | `6d6kh3!` |
 | `unknown-color` | a `#name` the palette does not define | `2d6{#chartreuse}` |
-| `dead-trigger` | an explosion or reroll threshold no face can meet | `d6!o7` |
-| `endless-trigger` | an unbounded explosion or reroll every face meets | `d6!o1` |
+| `unknown-variable` | a `@name` the `vars` option does not define | `d20 + @str` |
+| `dead-trigger` | an explosion or reroll threshold no face, or roll an earlier operator makes, can meet | `d6!o7` |
+| `endless-trigger` | an unbounded explosion or reroll every face of a die it can reach meets | `d6!o1` |
 | `limit-draws` | more dice than `LIMITS.draws` | `60d6 + 60d6` |
 | `limit-chain` | one face chained past `LIMITS.chain` | `1d6!` |
 | `limit-length` | a formula longer than `LIMITS.length` | -- |
 | `limit-operands` | more operands than `LIMITS.operands` | -- |
 | `limit-faces` | a face list outside 2 to `LIMITS.faces` faces | `d[1..102]` |
 | `limit-value` | a magnitude past `LIMITS.value` | `1d6 + 1001` |
-| `result-too-large` | a sum past the integers a number holds exactly | `(((((1000)sx1000)sx1000)sx1000)sx1000)sx1000` |
+| `result-too-large` | a sum, scaled reduction, or vertically exploded die past the integers a number holds exactly | `(((((1000)sx1000)sx1000)sx1000)sx1000)sx1000` |
 | `invalid-roll` | a custom `random` returned outside `[1, faceCount]` | -- |
 
 Each `limit-` code names the [`LIMITS`](docs/GRAMMAR.md#limits-and-safety) key it enforces. `1d6!`
@@ -349,7 +373,7 @@ seal are the exception: they are [consumed by it](#a-face) and appear as its one
 | `faces` | `NotationFace[]` | always | every face, dropped ones included |
 | `mode` | `"sum"`, `"count"`, `"individual"` | always | the outermost reduction |
 | `labels` | `string[]` | when any face carries a name or is a string face, and always under `i` | per-face display text, positionally parallel to `values` |
-| `subtotals` | `NotationSubtotal[]` | when any face carries a name | per-name totals, in first-appearance order |
+| `subtotals` | `NotationSubtotal[]` | when any face carries a name | per-name totals, in first-appearance order: sums, or counts under `c`, never scaled |
 | `scale` | `NotationScale` | when the outermost reducer carries one | the `xN` or `/N` that `total` already includes |
 
 **`scale` is the one trap.** `total` has it applied and `values` do not, so a renderer that sums
@@ -395,10 +419,16 @@ the result. Only a seal inside a larger formula does this. A reducer that ends t
 ### Names, subtotals, and modes
 
 A named die groups: every face sharing a name contributes to one entry in `subtotals`, colored by
-the die's own color or, without one, by `autoColor` ([Colors](#colors)).
+the name's color (the first explicit color written for that name, in reading order) or, without
+one, by `autoColor` ([Colors](#colors)).
 `2d6{#red,'fire'} + 1d8{'ice'}` on 3, 4, 7 produces subtotals of `fire: 7` (`#cc3333`, the
 palette's red) and `ice: 7` (an auto color), with `total: 14` unchanged. Subtotals describe the
 roll; they never change the arithmetic.
+
+A subtotal reduces the way the formula does. Under `c` it counts its name's surviving faces, so
+`(4d6{'fire'} + 2d6{'ice'})ko5c` reports how many of the successes were fire and how many ice.
+Otherwise it sums them. A `scale` applies to `total` only: `(2d6{'fire'}+3)sx2` on 3 and 4 gives
+`total: 20` and `fire: 7`.
 
 `mode` says how to present `total`:
 
@@ -487,6 +517,8 @@ Options are supplied per call. RollAtom has no mutable global configuration.
 | `random` | `(faceCount: number) => number` | Web Crypto CSPRNG | Selects a face for every base roll, explosion, and reroll |
 | `palette` | `Record<string, string>` | `DEFAULT_PALETTE` | Resolves named color tokens such as `#red` |
 | `autoColor` | `(label: string) => string` | Stable color derived from the label | Colors named subtotals that have no explicit color |
+| `limits` | `Partial<Limits>` | `LIMITS` | Replaces any of the caps on dice, chains, length, operands, faces, and values ([Limits](#limits)) |
+| `vars` | `Record<string, number>` | none | Values behind `@name` in a formula ([Variables](#variables)) |
 
 ### Custom random source
 
@@ -518,11 +550,30 @@ prefetch its values and expose them through the synchronous callback.
 The callback is invoked once for every random draw, including explosion and reroll draws. Draw order
 is deterministic for a given formula, as specified in [Limits and safety](docs/GRAMMAR.md#limits-and-safety).
 
+`seededRandom(seed)` returns a reproducible source: the same integer seed gives the same draws, so
+storing the seed beside the formula is enough to replay a roll.
+
+```ts
+import { rollDice, seededRandom } from "rollatom";
+
+const seed = 20261017;
+const first = rollDice("4d6dl1", { random: seededRandom(seed) });
+const again = rollDice("4d6dl1", { random: seededRandom(seed) });
+// first.total === again.total
+```
+
+Each call to `seededRandom` starts a fresh stream; passing one returned function to several rolls
+continues its stream across them. The seed must be a safe integer, or the call throws `RangeError`.
+The source is not cryptographic, so a player who knows the seed can predict every roll; keep the
+default source where that matters.
+
 ### Colors
 
-`palette` maps named tokens to the color metadata returned on faces and subtotals. Palette keys
-should be lowercase because color tokens are case-insensitive. A 3- or 6-digit hex token such
-as `#f0f` or `#ff00aa` does not use the palette.
+`palette` maps named tokens to the color metadata returned on faces and subtotals. Color tokens
+and palette keys both match whatever their case: `#Brand` finds a `brand` or `Brand` key, and when
+a palette has both, the lowercase key wins. Only the palette's own non-empty string values count.
+A token that reads as 3- or 6-digit hex, such as `#f0f`, `#ff00aa`, or `#bad`, is always that hex
+color and never looks up the palette, so a palette key spelled like hex is unreachable.
 
 Supplying `palette` replaces the default palette. Extend `DEFAULT_PALETTE` when the standard
 names should remain available:
@@ -549,8 +600,63 @@ the same name ([Appearance](docs/GRAMMAR.md#appearance)). `autoColor` applies on
 explicit color; it does not assign a color to the individual faces. The default `autoColor` returns
 the same color for the same label.
 
-The limits are not options. They are fixed ([Limits and safety](docs/GRAMMAR.md#limits-and-safety))
-and readable through the `LIMITS` export.
+### Limits
+
+`limits` replaces any of the caps in [`LIMITS`](docs/GRAMMAR.md#limits-and-safety) for one call.
+A key left out keeps its default, and a cap can be lowered as well as raised:
+
+```ts
+import { compileDice, rollDice, validateDice } from "rollatom";
+
+validateDice("300d6");                          // DiceError: Too many dice
+rollDice("300d6", { limits: { draws: 300 } });  // rolls
+validateDice("d20", { limits: { value: 12 } }); // DiceError: Invalid die size
+
+const pool = compileDice("150d6!", { limits: { draws: 500, chain: 100 } });
+pool.roll();
+```
+
+- Each value is an integer of at least 1, and `faces` at least 2. Any other value, or a key `LIMITS`
+  does not have, throws `RangeError`.
+- `validateDice`, `lintDice`, and `explainDice` read `limits`, so given the roll's own options
+  they check against the same caps.
+- `compileDice` reads `limits` when compiling, and every `roll` of the result runs under them,
+  roll-time caps included. `CompiledRollOptions` has no `limits`.
+- Larger caps let one formula take more time and memory. A `dN` holds its N faces, so with
+  `value` at 100000, `d100000` builds 100,000 faces.
+- `LIMITS` keeps the defaults whatever a call passes.
+
+### Variables
+
+`vars` supplies the numbers behind `@name` in a formula, so a stored macro needs no string
+building:
+
+```ts
+import { compileDice, rollDice } from "rollatom";
+
+const sheet = { str: 3, level: 5, dc: 8 };
+
+rollDice("d20 + @str", { vars: sheet });
+rollDice("@level d6", { vars: sheet });            // a count
+rollDice("(@level d10)ko@dc c", { vars: sheet });  // a count and a threshold
+
+const attack = compileDice("d20 + @str", { vars: sheet });
+attack.roll();
+```
+
+- A variable stands wherever the grammar takes a number: a count, a die size, a face, a
+  threshold, a bound, a scale factor, or a constant
+  ([Variables](docs/GRAMMAR.md#variables)). Its value meets the rule the number it stands for
+  meets, so `@level d6` with `level: 0` is rejected like `0d6`.
+- Names match whatever their case. When `vars` holds two keys that differ only in case, the
+  lowercase one is used.
+- A name runs as far as letters, digits, and `_` go, so `@level d6` needs its space: `@leveld6`
+  names a variable `leveld6`.
+- An undefined name throws `DiceError` with code `unknown-variable`, at the `@`. A value the
+  formula uses must be a safe integer, or the call throws `RangeError`.
+- `validateDice`, `lintDice`, and `explainDice` read `vars`, and check and explain the values.
+  `compileDice` reads `vars` when compiling; `CompiledRollOptions` has no `vars`.
+- A variable's name counts toward the length cap; its value does not.
 
 ## Validating without rolling
 
@@ -567,10 +673,36 @@ validateDice("d6!o7");        // DiceError: Explosion can never trigger
 validateDice("60d6 + 60d6");  // DiceError: Too many dice (more base dice than the draw cap allows)
 ```
 
-It makes every static check `rollDice` makes, and reads only `palette` from the options.
+It makes every static check `rollDice` makes, and reads only `palette`, `limits`, and `vars` from the options.
 
 A validated formula can still fail on the roll-time limits
 ([Calling the engine](#calling-the-engine)), so `rollDice` still needs its `try`.
+
+## Finding steps that do nothing
+
+`lintDice` lists the steps of a formula that can never change a roll, for an editor that flags
+them. A formula with warnings still rolls; an empty array means there is nothing to flag:
+
+```ts
+import { lintDice } from "rollatom";
+
+lintDice("4d6dl1");   // []
+lintDice("2d20kh2");  // [{ code: "inert-filter", message: "This filter always keeps every face", index: 4 }]
+```
+
+Each `DiceWarning` carries a `code` of type `DiceWarningCode`, a `message`, and the `index` where
+the step starts. Warnings come in text order. Branch on `code`; display `message`.
+
+| Code | Flagged when | Example |
+|---|---|---|
+| `inert-operator` | an operator can never change a roll: a clamp no roll is past, a reroll or explosion no roll reaches, or no die in its scope | `d6min1` |
+| `inert-filter` | a keep filter can never see more faces than it keeps | `2d20kh2` |
+| `empty-filter` | a drop filter always drops every face it sees | `2d6dl2` |
+| `inert-scale` | a scale of 1 | `(2d8+3)sx1` |
+
+A warning is certain: a step that changes nothing only on some rolls is not flagged. `lintDice`
+throws the `DiceError` `validateDice` would report, draws no dice, and reads only `palette`,
+`limits`, and `vars` from its options.
 
 ## Rolling one formula many times
 
@@ -598,8 +730,9 @@ Static errors throw from `compileDice`, not from `roll`. Roll-time ones still th
 compileDice("6d6kh3!");  // throws DiceError: Invalid notation
 ```
 
-`palette` is read when the formula is compiled. `random` and `autoColor` given to `compileDice`
-are defaults each `roll` may override:
+`palette`, `limits`, and `vars` are read when the formula is compiled. `random` and `autoColor`
+given to `compileDice` are read then too, and are defaults each `roll` may override. Changing the
+options object afterwards changes no roll:
 
 ```ts
 const macro = compileDice("2d6{'pip', #brand}", { palette: { brand: "#7950f2" } });
@@ -608,7 +741,7 @@ macro.roll();                                                       // the defau
 macro.roll({ random: (faces) => myRandom.uniformInteger(1, faces) });  // a source of your own
 ```
 
-`roll` takes `CompiledRollOptions`: `RollOptions` without `palette`. For a formula rolled once,
+`roll` takes `CompiledRollOptions`: `RollOptions` without `palette`, `limits`, and `vars`. For a formula rolled once,
 `rollDice` costs the same.
 
 ## Explaining a formula
@@ -647,18 +780,18 @@ explainDice("2d8sx2 + 3");
 // The total is the sum of the faces.
 ```
 
-It draws no dice, reads only `palette` from its options, and throws the `DiceError`
+It draws no dice, reads only `palette`, `limits`, and `vars` from its options, and throws the `DiceError`
 `validateDice` would return. The wording is English only and may change in any release, like
 `DiceError.message`; do not match against it.
 
 ## Versioning
 
 RollAtom follows semantic versioning from 1.0.0. The contract is the set of exports this document
-describes -- `rollDice`, `compileDice`, `validateDice`, `explainDice`, `DiceError`, `LIMITS`, `DEFAULT_PALETTE`,
+describes -- `rollDice`, `compileDice`, `validateDice`, `lintDice`, `explainDice`, `seededRandom`, `DiceError`, `LIMITS`, `DEFAULT_PALETTE`,
 and the `NotationResult`, `NotationFace`, `NotationSubtotal`, `NotationScale`, `RollOptions`,
-`CompiledDice`, `CompiledRollOptions`, `Limits`, `DiceErrorCode`, and `RandomInt` types --
-together with the grammar itself. A formula that rolls
-under 1.0 keeps rolling under every later 1.x, and keeps the same shape of result.
+`CompiledDice`, `CompiledRollOptions`, `Limits`, `DiceErrorCode`, `DiceWarning`, `DiceWarningCode`, and `RandomInt` types --
+together with the grammar itself. A formula that rolls under 1.0 keeps rolling under every later
+1.x, with the two exceptions below, and keeps the same shape of result.
 
 What that covers:
 
@@ -666,11 +799,22 @@ What that covers:
 - **Rolled numbers are not covered; the draw order is.** A given formula draws from `random` in the
   same order ([Determinism](docs/GRAMMAR.md#determinism)), so a recorded seed replays the same roll.
 - **ESM-only is part of the promise.** 1.x will not add a CommonJS build.
-- **`DiceError` messages are not covered; the [`code`](#error-codes) is.** Which formulas are
-  rejected, and with which code, will not change within 1.x. The wording may, and so may the exact
-  `index`: it is for drawing a caret, not comparing.
+- **`DiceError` messages are not covered; the [`code`](#error-codes) is.** A formula rejected
+  under the default limits stays rejected with the same code, unless a minor release gives it a
+  meaning: new grammar, or a static check that rejected a formula that can roll. It then rolls, or
+  fails with the code of the rule its new meaning breaks. The wording may change, and so may the
+  exact `index`: it is for drawing a caret, not comparing. `expected` may list more tokens.
+- **Two kinds of formula that roll may be rejected in a minor release.** An unbounded explosion or
+  until-reroll that can reach a die whose every face meets its trigger, which ends in
+  `limit-chain` whenever that die triggers, becomes `endless-trigger`. A written number above
+  9007199254740991, which rolls as a rounded number, becomes `syntax`. Every other formula that
+  rolls keeps rolling.
+- **[`lintDice`](#finding-steps-that-do-nothing) codes are covered; which steps it flags is not.**
+  A minor release may flag more steps that can never change a roll.
 
-Additions are minor releases: new grammar, new optional result fields, new optional `RollOptions`.
-A formula that stops rolling, or a result that changes shape, is a bug.
+Additions are minor releases: new grammar, new optional result fields, new optional `RollOptions`,
+and new error and warning codes, so a `switch` over `DiceErrorCode` or `DiceWarningCode` needs a
+`default` branch. A formula that stops rolling outside the two exceptions above, or a result that
+changes shape, is a bug.
 
 [CHANGELOG.md](CHANGELOG.md) lists what changed in each release.

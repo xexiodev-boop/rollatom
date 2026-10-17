@@ -44,4 +44,12 @@ jobs:
       # rather than after publishing.
       - run: npm run smoke
 
+      # The README names Bun as a runtime. Once per run is enough: Bun does not use the Node
+      # version the matrix varies.
+      - uses: oven-sh/setup-bun@v2
+        if: matrix.node == 24
+
+      - run: node scripts/smoke.mjs bun
+        if: matrix.node == 24
+
       - run: npm run size

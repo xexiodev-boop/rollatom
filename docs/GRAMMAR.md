@@ -8,7 +8,7 @@ filter, the limits, and worked examples. For installing, calling the engine, and
 result, see the [README](../README.md).
 
 This document is the contract. A formula that rolls under 1.x keeps rolling under every later
-1.x ([Versioning](../README.md#versioning)).
+1.x, with the two exceptions [Versioning](../README.md#versioning) names.
 
 ## Contents
 
@@ -25,6 +25,7 @@ This document is the contract. A formula that rolls under 1.x keeps rolling unde
   - [Scale](#scale)
 - [Combining blocks, constants, and groups](#combining-blocks-constants-and-groups)
   - [Open vs sealed operands](#open-vs-sealed-operands)
+- [Variables](#variables)
 - [Order and errors](#order-and-errors)
 - [Limits and safety](#limits-and-safety)
   - [Determinism](#determinism)
@@ -71,7 +72,8 @@ group       = "(" expr ")" [ operators ] [ filters ] [ final ]
 
 block       = [ UINT ] "d" faces [ appearance ] [ operators ] [ filters ] [ final ]
 
-constant    = UINT                              ; a single face, no die identity
+constant    = UINT                              ; a single face, no die identity; zero allowed,
+                                                ; negative only through a variable
 
 faces       = UINT                              ; dN  ==  d[1..N]     (N in 2..1000)
             | "f"                               ; dF  ==  d['-'=-1, ''=0, '+'=1]
@@ -106,16 +108,23 @@ final       = ( "s" | "c" ) [ scale ] | "i"     ; at most one; default is s
 scale       = "x" UINT                          ; multiply the reduction
             | "/" UINT [ "u" ]                  ; divide it, rounding down; "u" rounds up
 
-UINT        = digit { digit }                   ; a count; must be 1 or more, zero is an error
-INT         = [ "-" ] digit { digit }           ; a signed value; zero allowed
+UINT        = digit { digit } | variable        ; a count; must be 1 or more, zero is an error
+INT         = [ "-" ] ( digit { digit } | variable )  ; a signed value; zero allowed
+
+variable    = "@" VARNAME                       ; a number supplied by the caller
+VARNAME     = ( letter | "_" ) { letter | digit | "_" }
 ```
 
 Whitespace is insignificant except inside a `STRING`. It may separate tokens but never split one (`1
 0d6` is not `10d6`). The lexer is **greedy**: `!!!` reads as `!!` then `!`. The one-explosion rule
 ([Operators](#operators-clamp-explosion-reroll)) rejects it, just as it rejects `! !` as two
-separate tokens. Keywords, die letters, and color names are case-insensitive; the contents of a
-quoted `STRING` are kept exactly as written. Control characters (C0 and DEL) are therefore rejected
-inside strings.
+separate tokens. Keywords, die letters, color names, and variable names are case-insensitive; the contents of a
+quoted `STRING` are kept exactly as written. Inside a `STRING`, `''` stands for one apostrophe:
+`'Rogue''s'` reads as *Rogue's*. Control characters (C0 and DEL) are rejected inside strings.
+
+A written number holds at most 9007199254740991 (2<sup>53</sup> − 1), the largest integer a
+JavaScript number holds exactly; a larger one is a syntax error. The value caps in
+[Limits and safety](#limits-and-safety) bound most numbers far below that.
 
 The **canonical order inside a block is fixed**: `count · d · faces · appearance · operators ·
 filters · final`. Writing them out of order is a syntax error, not a silent reorder (see
@@ -191,11 +200,12 @@ it. Conflicts stay as written. When a name carries more than one explicit color,
 reading order is used for the name and its subtotal. Color never crosses names, and
 a bare `{#red}` with no name paints only its own block.
 
-When the final operator is a sum, the engine reports the grand total **and** a breakdown grouped by
-**name**: every named face joins its name's subtotal, colored by the name's color as above
-(or the name's automatic color when no explicit color appears). Color without a name is
-paint only; it never creates a subtotal. For example, `2d6{'fire'} + 1d4{'cold'}` shows a fire
-subtotal and a cold subtotal.
+The engine reports the grand total **and** a breakdown grouped by **name**: every named face that
+survives joins its name's subtotal, colored by the name's color as above (or the name's automatic
+color when no explicit color appears). A subtotal follows the formula's reduction: it sums its
+faces' values, and under an outermost `c` it counts them. Color without a name is paint only; it
+never creates a subtotal. For example, `2d6{'fire'} + 1d4{'cold'}` shows a fire subtotal and a cold
+subtotal, and `(4d6{'fire'} + 2d6{'ice'})ko5c` counts the fire and ice successes separately.
 
 ## Operators: clamp, explosion, reroll
 
@@ -204,7 +214,10 @@ a later operator sees everything an earlier one did. Two uniform rules:
 
 - Operators act only on faces with a **source**. Constants and sealed faces
   ([Combining blocks](#combining-blocks-constants-and-groups)) cannot explode, be rerolled, or be
-  clamped, so `(2d6+3)!` leaves the 3 alone.
+  clamped, so `(2d6+3)!` leaves the 3 alone. In a group whose operands are all constants or
+  sealed, an operator has no face to act on: a clamp, a single-shot reroll, or a rank reroll there
+  does nothing, and an explosion or an until-reroll there is a dead trigger
+  ([Limits and safety](#limits-and-safety)).
 - Operators read and write the **raw roll**, never the signed value. The sign a face was joined with
   ([Combining blocks](#combining-blocks-constants-and-groups)) survives every operator untouched: in
   `(2d8 - 2d4)ru2` a d4 showing 2 rerolls. It is selected by its raw 2, not its value −2, and the
@@ -280,7 +293,7 @@ matches the corresponding restricted die: `d10rru1` matches `d[2..10]`, and rero
 `d[-1,0x6,1x3]` matches `d[-1,1x3]`. Only value thresholds are supported because a rank-based form
 has no stopping condition. The static checks match those for unbounded explosions
 ([Limits and safety](#limits-and-safety)): a threshold no face can meet is invalid, as is one that
-every face meets. The doubling convention differs from explosions: `rr` changes a single reroll to
+every face of a die it can reach meets. The doubling convention differs from explosions: `rr` changes a single reroll to
 an until-reroll, while `!!` changes an unbounded explosion to one layer.
 
 ## Filters: keeping and dropping
@@ -319,10 +332,14 @@ read the count as "up to N". A filter with no survivors yields the empty array (
 `c` → 0).
 
 **Rank selection is stable.** Faces with equal values keep their array order, and among ties the
-face **earlier in the array is selected first**: kept first by `kh`/`kl`/`km`, dropped first by
+face **earlier in the array is selected first**: kept first by `kh`/`kl`, dropped first by
 `dh`/`dl`, rerolled first by `rl`/`rh` ([Operators](#operators-clamp-explosion-reroll)). This
 matters because faces carry identity: `(1d6{'a'} + 1d6{'b'})kh1` on a tie keeps *a*,
 deterministically.
+
+`km` is the exception. It takes its window from the middle of the same stable order, so among
+tied faces it keeps the ones in the middle positions: `(d6{'a'} + d6{'b'} + d6{'c'})km1` with all
+three equal keeps *b*.
 
 The letter scheme is uniform across [Operators](#operators-clamp-explosion-reroll) and
 [Filters](#filters-keeping-and-dropping): **`k`/`d`/`r`** = keep, drop, or reroll, **`h`/`l`** = by
@@ -338,7 +355,7 @@ written, is `s`.
 |---|---|
 | `s` | **sum** of the face values (the default) |
 | `c` | **count**: how many items (faces) are in the array |
-| `i` | **individual**: the list of face values (labels for string faces) |
+| `i` | **individual**: the list of faces, each shown by its string label, else its die's name, else its value |
 
 `s`, `c`, and `i` are uniform reductions over the same array, with **no exceptions**: `s` adds the
 item values, `c` counts the items, and `i` lists them. Every face is one item, whether it is a
@@ -370,12 +387,13 @@ so the notation always names what it scales: a sum or a count.
   takes −7 to −3. The division happens once, at the reduction, so every reported value stays an
   integer.
 - N is a **count** from 1 to 1000 ([Limits and safety](#limits-and-safety)). `x1` and `/1` are legal
-  and change nothing. The `u` suffix belongs to division only.
+  and change nothing; [`lintDice`](../README.md#finding-steps-that-do-nothing) flags them. The `u` suffix belongs to division only.
 - A scale requires its reducer. `2d6x2` is a syntax error because it does not say what is
   multiplied; write `2d6sx2` or `2d6cx2`. To scale a formula of several operands, wrap it:
   `(2d8+3)sx2`. `i` is a report and takes no scale.
 - The scale applies to the **reduction**, never to the dice. `1d8sx2` yields only even numbers; a 5e
   critical hit rolls the dice twice and is written `2d8+3`.
+- Subtotals are never scaled. `(2d6{'fire'}+3)sx2` on 3 and 4 totals 20 with a fire subtotal of 7.
 
 ## Combining blocks, constants, and groups
 
@@ -429,6 +447,22 @@ an implicit group summed by default; to report the whole thing with `c` or `i`, 
 formula keeps its faces open for display, and the total carries the scale; the result reports
 the outermost scale next to the total so a renderer can show it.
 
+## Variables
+
+`@name` stands for a number the caller supplies with the formula (the `vars` option; see
+[Variables](../README.md#variables)). It may stand wherever the grammar takes a `UINT` or an
+`INT`: a count, a die size, a face or range end, a repetition, a threshold, a bound, an explosion
+trigger, a scale factor, or a constant. `@level d6 + @str` rolls *level* d6 and adds *str*.
+
+- The value replaces the number before any rule is checked, so it meets the rule that number
+  meets: a count of at least 1, a die size of at least 2, the value cap
+  ([Limits and safety](#limits-and-safety)), and every static check on triggers.
+- A constant may be negative through a variable. It joins by its sign like any face: with
+  `mod` at −2, `d20 + @mod` subtracts 2 and `d20 - @mod` adds 2.
+- `VARNAME` runs as far as letters, digits, and `_` go. `@n d6` is a count of *n*; `@nd6` is the
+  variable *nd6*. Names are case-insensitive.
+- A name the caller does not define is an error.
+
 ## Order and errors
 
 - **Operators precede filters precede the final operator**, in that order, within any block or
@@ -454,10 +488,11 @@ is about and a code naming the rule it broke: see
 
 ## Limits and safety
 
-These bound the payload and stop pathological formulas. The numbers are fixed implementation
-limits, not per-formula choices, so a formula that rolls in one place rolls everywhere. They are
-exported frozen as `LIMITS`, for an application that wants to show a character counter or a "too
-many dice" hint without repeating the numbers:
+These bound the payload and stop pathological formulas. The numbers below are the defaults. A
+caller can replace any of them with the `limits` option
+([Limits](../README.md#limits)), so a formula past a default cap rolls only where a larger cap
+is set. The defaults are exported frozen as `LIMITS`, for an application that wants to show a
+character counter or a "too many dice" hint without repeating the numbers:
 
 ```ts
 import { LIMITS } from "rollatom";
@@ -477,15 +512,20 @@ without the caller reading the message (see [Error codes](../README.md#error-cod
 - **Unbounded explosions** (`!`, `*`) and **until-rerolls** (`rru`, `rro`) cap at 50 chained
   rolls per face; hitting the cap is an error. Impossible and certain triggers are rejected
   **at parse time**, before any roll: a trigger no face can meet (`d6!o7`, `d6rru0`) is dead,
-  and an unbounded glyph on a die whose *every* face meets the trigger (`d[3,3]!`, `d6!o1`,
-  `d6rru6`) can never halt. A certainty that only arises at runtime (for example, a `min` that
-  lifts every face to the trigger) still stops at the chain cap. The bounded glyphs are always
-  finite, so `d6!!o1` is legal, as are dead bounds on the single-shot rerolls (`ru0`).
-- **Face value magnitude** for literal faces, `=INT` assignments, constants, clamp bounds,
-  and scale factors is capped at ±1000; a face list holds **2–100 faces**.
+  unless an earlier operator can carry a raw roll to it (`d6min7!o7`, `(d6*)!o8`, `d6*rro7`),
+  and an unbounded glyph can never halt when it can reach a die whose *every* face meets the
+  trigger (`d[3,3]!`, `d6!o1`, `d6rru6`), whatever other dice share the group
+  (`(d[3,3]+d6)!`). A die cannot reach it when a filter must drop the die first
+  (`(d[3,3]dh1+d6)!`) or a clamp keeps it under the trigger (`d[3,3]max2!`). A certainty that
+  only arises at runtime (for example, a `min` that lifts every face to the trigger) still stops
+  at the chain cap. The bounded glyphs are always finite, so `d6!!o1` is legal, as are dead
+  bounds on the single-shot rerolls (`ru0`).
+- **Face value magnitude** for literal faces, `=INT` assignments, a string face's positional
+  value, constants, clamp bounds, and scale factors is capped at ±1000; a face list holds
+  **2–100 faces**.
 - **Formula length** ≤ 200 characters, measured after whitespace is stripped; **operands** per
   expression ≤ 20.
-- **Exact results.** Every seal, subtotal, and total, and each partial sum on the way to one, must
+- **Exact results.** Every seal, subtotal, total, and vertically exploded die, and each partial sum on the way to one, must
   stay within ±(2<sup>53</sup> − 1), the integers a JavaScript number holds exactly. The caps above
   bound each operand but not a product: a constant under five nested `sx1000` scales can pass that
   range, and beyond it adding 1 no longer changes the number. Such a roll is an error, never a

@@ -9,6 +9,8 @@ const PORT = Number(process.env.PORT ?? 4173);
 const ROUTES = {
   "/": [new URL("../playground/index.html", import.meta.url), "text/html; charset=utf-8"],
   "/rollatom.js": [new URL("../dist/index.js", import.meta.url), "text/javascript; charset=utf-8"],
+  "/logo.png": [new URL("../playground/logo.png", import.meta.url), "image/png"],
+  "/favicon.png": [new URL("../playground/favicon.png", import.meta.url), "image/png"],
 };
 
 const server = createServer((request, response) => {

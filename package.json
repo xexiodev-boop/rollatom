@@ -33,7 +33,7 @@
   ],
   "sideEffects": false,
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && tsc -p tsconfig.types.json",
     "test": "vitest run",
     "check": "tsc --noEmit && tsc -p tsconfig.test.json && vitest run",
     "size": "node scripts/size.mjs",

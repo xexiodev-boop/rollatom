@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compileDice, DiceError, explainDice, LIMITS, rollDice, validateDice, type DiceErrorCode, type RandomInt } from "./index";
+import { compileDice, DiceError, explainDice, LIMITS, lintDice, rollDice, seededRandom, validateDice, type DiceErrorCode, type RandomInt } from "./index";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Executable specification for the universal dice grammar (see `docs/GRAMMAR.md`),
@@ -165,6 +165,33 @@ describe("dice notation grammar", () => {
       expect(roll("d6{'red'}", seq(3)).labels).toEqual(["red"]);
     });
 
+    it("counts each name's faces when the formula counts", () => {
+      const result = roll("(4d6{'fire'} + 2d6{'ice'})ko5c", seq(6, 5, 1, 2, 6, 3));
+      expect(result.total).toBe(3);
+      expect(result.subtotals).toEqual([
+        expect.objectContaining({ label: "fire", total: 2 }),
+        expect.objectContaining({ label: "ice", total: 1 }),
+      ]);
+    });
+
+    it("leaves subtotals unscaled", () => {
+      const result = rollDice("(2d6{'fire'}+3)sx2", { random: seq(3, 4) });
+      expect(result.total).toBe(20);
+      expect(result.subtotals![0].total).toBe(7);
+    });
+
+    it("matches palette keys whatever their case", () => {
+      const color = (input: string, palette: Record<string, string>) => rollDice(input, { palette, random: seq(1) }).faces[0].color;
+      expect(color("d6{#crimson}", { Crimson: "#990000" })).toBe("#990000");
+      expect(color("d6{#CRIMSON}", { Crimson: "#990000", crimson: "#aa0000" })).toBe("#aa0000");
+      expect(color("d6{#bad}", { bad: "#123456" })).toBe("#bad"); // hex-shaped tokens are hex
+    });
+
+    it("reads only the palette's own keys", () => {
+      expect(validateDice("d6{#constructor}")?.code).toBe("unknown-color");
+      expect(validateDice("d6{#x}", { palette: { x: 7 } as never })?.code).toBe("unknown-color");
+    });
+
     it("reports subtotals grouped by name", () => {
       const result = roll("2d6{'fire'} + 1d4{'cold'}", seq(2, 5, 3));
       expect(result.total).toBe(10);
@@ -315,6 +342,16 @@ describe("dice notation grammar", () => {
       expect(() => roll("d6!o1")).toThrow(DiceError); // every face meets it - never halts
       expect(() => roll("d[3,3]!")).toThrow(DiceError); // every face is the maximum
       expect(roll("d6!!o1", seq(2, 5)).total).toBe(7); // bounded + certain is finite
+    });
+
+    it("keeps a trigger live when an earlier operator can carry a roll to it", () => {
+      // min7 lifts every roll to 7; the spawn is a fresh d6 and stops the chain.
+      expect(roll("d6min7!o7", seq(3, 2)).values).toEqual([7, 2]);
+      // The vertical seat reaches 6 + 3 = 9, past any single face.
+      expect(roll("(d6*)!o8", seq(6, 3, 2)).values).toEqual([9, 2]);
+      expect(roll("d6*rro7", seq(6, 2, 4)).values).toEqual([4]);
+      expect(validateDice("d6max5!")).toBeNull(); // a clamp below the trigger is still legal
+      expect(validateDice("d6min3!o7")?.code).toBe("dead-trigger");
     });
   });
 
@@ -606,6 +643,15 @@ describe("dice notation grammar", () => {
 
   // ── Combining: +/-, constants, groups, open/sealed ─────────────────────────
   describe("combining blocks", () => {
+    it("never reports a negative zero", () => {
+      const zero = (n: number) => Object.is(n, 0);
+      expect(roll("-0").values.every(zero)).toBe(true);
+      const negated = rollDice("-d[0,1]{'z'}", { random: seq(1) });
+      expect([...negated.values, negated.faces[0].value, negated.subtotals![0].total].every(zero)).toBe(true);
+      expect(zero(rollDice("d[-0,1]", { random: seq(1) }).faces[0].raw)).toBe(true);
+      expect(zero(roll("(-d6)s/7u", seq(1)).total)).toBe(true); // ceil(-1/7)
+    });
+
     it("adds a constant as a single face in the array", () => {
       expect(roll("2d6+3", seq(2, 5)).total).toBe(10);
       expect(roll("4d8 + 1 + 2d6", seq(3, 3, 3, 3, 2, 4)).total).toBe(19); // 12 + 1 + 6
@@ -714,6 +760,9 @@ describe("dice notation grammar", () => {
       expect(() => roll(`2d6{'fire${newline}'}`)).toThrow(DiceError);
       expect(() => roll(`d['x${del}','y']`)).toThrow(DiceError);
       expect(roll("d['a b','c']", seq(1)).labels).toEqual(["a b"]); // plain spaces are content
+      expect(roll("d['it''s','c']", seq(1)).labels).toEqual(["it's"]); // '' is one apostrophe
+      expect(roll("d['','''']", seq(2)).labels).toEqual(["'"]);
+      expect(rollDice("d6{'Rogue''s'}", { random: seq(2) }).subtotals![0].label).toBe("Rogue's");
     });
   });
 
@@ -991,6 +1040,7 @@ describe("error codes", () => {
   const REACHED: Record<DiceErrorCode, () => DiceError> = {
     syntax: () => thrown("6d6kh3!"),
     "unknown-color": () => thrown("2d6{#chartreuse}"),
+    "unknown-variable": () => thrown("d20 + @str"),
     "dead-trigger": () => thrown("d6!o7"),
     "endless-trigger": () => thrown("d6!o1"),
     "limit-draws": () => thrown("60d6 + 60d6"),
@@ -1138,7 +1188,9 @@ describe("explainDice", () => {
 
   it("names the join of every operand after the first", () => {
     expect(explainDice("10 - 2d4kh1")).toEqual(["Start with 10.", "Subtract 2d4, keep the highest.", SUM_KEPT]);
-    expect(explainDice("-d6")).toEqual(["Subtract 1d6.", SUM]);
+    expect(explainDice("-d6")).toEqual(["Roll 1d6, negate the result.", SUM]);
+    expect(explainDice("-3 + d6")[0]).toBe("Start with -3.");
+    expect(explainDice("-(d6 + d4)")).toEqual(["Roll a group:", "  Roll 1d6.", "  Add 1d4.", "  Across the group, negate the result.", SUM]);
   });
 
   it("indents a group's steps and states what applies across it", () => {
@@ -1177,12 +1229,16 @@ describe("explainDice", () => {
     expect(die("4d['cat','dog']")).toBe("Roll 4 dice with faces 'cat'=1, 'dog'=2.");
   });
 
-  it("reports a name, and the color the roll will resolve for it", () => {
-    expect(explainDice("2d6{#red,'fire'} + 1d8{'fire'}").slice(0, 2)).toEqual([
-      "Roll 2d6 (named 'fire', colored #cc3333).",
-      "Add 1d8 (named 'fire', colored #cc3333).",
+  it("reports a name, and the color as written, shared across the name", () => {
+    expect(explainDice("2d6{#Red,'fire'} + 1d8{'fire'}").slice(0, 2)).toEqual([
+      "Roll 2d6 (named 'fire', colored #red).",
+      "Add 1d8 (named 'fire', colored #red).",
     ]);
-    expect(explainDice("1d6{#brand}", { palette: { brand: "#010203" } })[0]).toBe("Roll 1d6 (colored #010203).");
+    expect(explainDice("1d6{#FF00aa}")[0]).toBe("Roll 1d6 (colored #ff00aa).");
+  });
+
+  it("writes an apostrophe in a face label as ''", () => {
+    expect(explainDice("d['it''s',2,3]")[0]).toBe("Roll 1 die with faces 'it''s'=1, 2, 3.");
   });
 
   it("throws what validateDice reports, and draws nothing", () => {
@@ -1193,5 +1249,331 @@ describe("explainDice", () => {
     expect(() => explainDice("6d6kh3!")).toThrow(
       expect.objectContaining({ code: "syntax", index: validateDice("6d6kh3!")!.index }),
     );
+  });
+});
+
+describe("limits option", () => {
+  const code = (formula: string, limits?: Parameters<typeof validateDice>[1]) => validateDice(formula, limits)?.code ?? null;
+  const ones = (n: number) => Array.from({ length: n }, () => "1").join("+");
+  const named = (n: number) => `2d6{'${"a".repeat(n - 7)}'}`;
+
+  it("moves each cap to the value given, legal at it and rejected one past it", () => {
+    const at = (limits: object, formula: string, past: string) => [
+      code(formula),
+      code(formula, { limits }),
+      code(past, { limits }),
+    ];
+    expect(at({ draws: 300 }, "300d6", "301d6")).toEqual(["limit-draws", null, "limit-draws"]);
+    expect(at({ value: 5000 }, "d5000", "d5001")).toEqual(["limit-value", null, "limit-value"]);
+    expect(at({ value: 5000 }, "5000", "5001")).toEqual(["limit-value", null, "limit-value"]);
+    expect(at({ faces: 150 }, "d[1x150]", "d[1x151]")).toEqual(["limit-faces", null, "limit-faces"]);
+    expect(at({ faces: 150 }, "d[1..150]", "d[1..151]")).toEqual(["limit-faces", null, "limit-faces"]);
+    expect(at({ operands: 30 }, ones(30), ones(31))).toEqual(["limit-operands", null, "limit-operands"]);
+    expect(at({ length: 300 }, named(300), named(301))).toEqual(["limit-length", null, "limit-length"]);
+  });
+
+  it("moves the chain cap", () => {
+    // One base 6, then 59 more sixes, then a 1: a chain of 60 rolls past the base.
+    const chain = () => seq(6, ...Array(59).fill(6), 1);
+    expect(() => rollDice("1d6!", { random: chain() })).toThrow(expect.objectContaining({ code: "limit-chain" }));
+    expect(rollDice("1d6*", { random: chain(), limits: { chain: 60 } }).total).toBe(6 * 60 + 1);
+  });
+
+  it("can lower a cap", () => {
+    expect(code("11d6", { limits: { draws: 10 } })).toBe("limit-draws");
+    expect(code("d7", { limits: { value: 6 } })).toBe("limit-value");
+  });
+
+  it("keeps the default for every key left out", () => {
+    expect(code("d1001", { limits: { draws: 500 } })).toBe("limit-value");
+    expect(code("d6", { limits: { draws: undefined } })).toBeNull();
+  });
+
+  it("holds a compiled formula to the limits it was compiled with, roll-time caps included", () => {
+    // `!!` adds one die per 6 and stops, so all 6s draw 300 dice without reaching the chain cap.
+    const compiled = compileDice("150d6!!", { limits: { draws: 200 } });
+    expect(compiled.roll({ random: () => 1 }).values).toHaveLength(150);
+    expect(() => compiled.roll({ random: maxFace })).toThrow(expect.objectContaining({ code: "limit-draws" }));
+  });
+
+  it("is read by explainDice", () => {
+    expect(() => explainDice("300d6")).toThrow(DiceError);
+    expect(explainDice("300d6", { limits: { draws: 300 } })[0]).toBe("Roll 300d6.");
+  });
+
+  it("leaves LIMITS as it was", () => {
+    rollDice("300d6", { limits: { draws: 300 } });
+    expect(LIMITS.draws).toBe(100);
+  });
+
+  it("does not expand a range past the face cap", () => {
+    // A million faces would be built if the range were expanded before the cap was checked.
+    expect(code("d[1..1000000]", { limits: { value: 1_000_000 } })).toBe("limit-faces");
+    // The rest of the list is still read: a later syntax error is the one reported.
+    expect(code("d[1..102")).toBe("syntax");
+  });
+
+  it("throws RangeError for a value that is not a usable cap", () => {
+    const bad = [{ draws: 0 }, { draws: -5 }, { draws: 1.5 }, { draws: NaN }, { draws: Infinity }, { faces: 1 }, { draws: "500" }, { dice: 500 }];
+    for (const limits of bad) {
+      expect(() => rollDice("1d6", { limits } as never)).toThrow(RangeError);
+      expect(() => validateDice("1d6", { limits } as never)).toThrow(RangeError);
+    }
+    expect(code("d[1,2]", { limits: { faces: 2 } })).toBeNull();
+  });
+
+  it("reads null as no overrides", () => {
+    expect(validateDice("1d6", { limits: null } as never)).toBeNull();
+    expect(rollDice("1d6", { limits: null, random: () => 4 } as never).total).toBe(4);
+  });
+});
+
+describe("seededRandom", () => {
+  const draws = (random: RandomInt, n: number, faces = 6) => Array.from({ length: n }, () => random(faces));
+
+  it("replays the same draws for the same seed", () => {
+    expect(draws(seededRandom(42), 50)).toEqual(draws(seededRandom(42), 50));
+    expect(rollDice("10d20!", { random: seededRandom(7) })).toEqual(rollDice("10d20!", { random: seededRandom(7) }));
+  });
+
+  it("gives different streams for different seeds, high bits included", () => {
+    expect(draws(seededRandom(1), 20)).not.toEqual(draws(seededRandom(2), 20));
+    expect(draws(seededRandom(1), 20)).not.toEqual(draws(seededRandom(1 + 2 ** 32), 20));
+  });
+
+  it("continues one stream across rolls", () => {
+    const random = seededRandom(3);
+    expect(rollDice("d20", { random }).total).toBe(draws(seededRandom(3), 1, 20)[0]);
+    expect(rollDice("d20", { random }).total).toBe(draws(seededRandom(3), 2, 20)[1]);
+  });
+
+  it("draws every face index, and only those", () => {
+    const seen = new Set(draws(seededRandom(9), 2000, 7));
+    expect([...seen].sort()).toEqual([1, 2, 3, 4, 5, 6, 7]);
+  });
+
+  it("throws RangeError for a seed that is not a safe integer", () => {
+    for (const seed of [1.5, NaN, Infinity, 2 ** 53, "1"]) expect(() => seededRandom(seed as never)).toThrow(RangeError);
+    expect(() => seededRandom(-5)).not.toThrow();
+  });
+});
+
+describe("expected tokens", () => {
+  const expected = (input: string) => validateDice(input)?.expected;
+
+  it("lists what can start where an unexpected character stands", () => {
+    expect(expected("2d")).toEqual(["number", "f", "[", "@"]);
+    expect(expected("2d6+")).toEqual(["number", "(", "d", "@"]);
+    expect(expected("2d6ko")).toEqual(["number", "-", "@"]);
+    expect(expected("2d6{#red kh}")).toEqual([",", "}"]);
+    expect(expected("d[1 2]")).toEqual([",", "..", "x"]);
+    expect(expected("(2d6")).toEqual(expect.arrayContaining([")", "+", "-", "kh", "!", "s"]));
+    expect(expected("2d6k")).not.toContain("number");
+  });
+
+  it("is absent for an error about a token already read, and for other codes", () => {
+    expect(validateDice("2d6!!!")).not.toHaveProperty("expected"); // the second explosion
+    expect(validateDice("2d6{'a")).not.toHaveProperty("expected"); // unterminated string
+    expect(validateDice("d6!o7")).not.toHaveProperty("expected");
+    expect(validateDice("101d6")).not.toHaveProperty("expected");
+  });
+
+  it("leaves code and index as they are", () => {
+    const error = validateDice("2d6+")!;
+    expect([error.code, error.index]).toEqual(["syntax", 4]);
+  });
+});
+
+describe("lintDice", () => {
+  const lint = (input: string) => lintDice(input).map((w) => `${w.code}@${w.index}`);
+
+  it("returns nothing for a formula where every step can matter", () => {
+    for (const formula of ["2d6+3", "4d6dl1", "d6min2", "2d20kh1", "6d6!dl6", "(2d6+3)kh2", "4dFko0", "d6*min3", "(2d8+3)sx2"])
+      expect(lintDice(formula)).toEqual([]);
+  });
+
+  it("flags an operator that can never change a roll", () => {
+    expect(lint("d6min1")).toEqual(["inert-operator@2"]);
+    expect(lint("d6max6")).toEqual(["inert-operator@2"]);
+    expect(lint("d6ru0")).toEqual(["inert-operator@2"]);
+    expect(lint("d6max5!")).toEqual(["inert-operator@6"]); // the clamp leaves no 6 to explode on
+    expect(lint("((2d6)s)rl1")).toEqual(["inert-operator@8"]); // no die in the group
+    expect(lint("(3+4)min2")).toEqual(["inert-operator@5"]);
+  });
+
+  it("flags a rank filter that keeps or drops every face it can see", () => {
+    expect(lint("2d20kh2")).toEqual(["inert-filter@4"]);
+    expect(lint("(2d6+3)kh3")).toEqual(["inert-filter@7"]); // a constant is a face
+    expect(lint("4d6dh2kl2")).toEqual(["inert-filter@6"]); // two faces are left for kl2
+    expect(lint("2d6dl2")).toEqual(["empty-filter@3"]);
+    expect(lint("(2d6 + (3d6)s)dh3")).toEqual(["empty-filter@14"]); // a seal is one face
+  });
+
+  it("flags a scale of 1", () => {
+    expect(lint("(2d8+3)sx1")).toEqual(["inert-scale@8"]);
+    expect(lint("(2d8)s/1u")).toEqual(["inert-scale@6"]);
+  });
+
+  it("lists warnings in text order, and throws what validateDice reports", () => {
+    expect(lint("2d6min1kh2 + (3)sx1")).toEqual(["inert-operator@3", "inert-filter@7", "inert-scale@17"]);
+    expect(() => lintDice("6d6kh3!")).toThrow(expect.objectContaining({ code: "syntax" }));
+  });
+
+  it("draws nothing", () => {
+    const random = () => {
+      throw new Error("lintDice drew a die");
+    };
+    expect(() => lintDice("100d6!", { random })).not.toThrow();
+  });
+});
+
+describe("variables", () => {
+  const vars = { str: 3, Level: 4, mod: -2, sides: 8, dc: 5, n: 2, zero: 0, half: 1.5 };
+  const roll = (input: string, rng: RandomInt = () => 1) => rollDice(input, { vars, random: rng });
+
+  it("stands for its value wherever a number may stand", () => {
+    expect(roll("d20 + @str").values).toEqual([1, 3]); // a constant
+    expect(roll("@level d6").values).toHaveLength(4); // a count
+    expect(roll("d@sides", seq(8)).total).toBe(8); // a die size
+    expect(roll("d[@mod..@str]").values).toEqual([-2]); // faces
+    expect(roll("6d6ko@dc c", seq(5, 6, 1, 2, 3, 4)).total).toBe(2); // a threshold
+    expect(roll("4d6kh@n").values).toHaveLength(2); // a filter count
+    expect(roll("d6min@str").total).toBe(3); // a clamp bound
+    expect(roll("d6!o@dc", seq(5, 2)).values).toEqual([5, 2]); // an explosion trigger
+    expect(roll("(2d6)sx@n", seq(3, 4)).total).toBe(14); // a scale factor
+  });
+
+  it("joins a negative value by its sign", () => {
+    expect(roll("d20 + @mod").total).toBe(-1);
+    expect(roll("d20 - @mod").total).toBe(3);
+    expect(roll("-@mod").total).toBe(2);
+  });
+
+  it("matches names whatever their case, a lowercase key winning", () => {
+    expect(roll("@LEVEL d6").values).toHaveLength(4);
+    expect(rollDice("@x", { vars: { X: 1, x: 2 } }).total).toBe(2);
+  });
+
+  it("runs the name as far as letters, digits, and _ go", () => {
+    expect(validateDice("@nd6", { vars })?.code).toBe("unknown-variable");
+    expect(roll("@n d6").values).toHaveLength(2);
+  });
+
+  it("runs every static check on the value", () => {
+    expect(validateDice("@zero d6", { vars })?.code).toBe("syntax"); // a count of 0
+    expect(validateDice("d20 + @big", { vars: { big: 5000 } })?.code).toBe("limit-value");
+    expect(validateDice("d6!o@sides", { vars })?.code).toBe("dead-trigger");
+    expect(lintDice("d6min@one", { vars: { one: 1 } }).map((w) => w.code)).toEqual(["inert-operator"]);
+  });
+
+  it("rejects an unknown or malformed variable with an offset", () => {
+    expect(validateDice("2d6 + @nope", { vars })).toMatchObject({ code: "unknown-variable", index: 6 });
+    expect(validateDice("2d6 + @nope")).toMatchObject({ code: "unknown-variable", index: 6 });
+    expect(validateDice("2d6 + @", { vars })).toMatchObject({ code: "syntax", index: 6 });
+  });
+
+  it("throws RangeError for a used value that is not a safe integer", () => {
+    expect(() => roll("d20 + @half")).toThrow(RangeError);
+    expect(() => validateDice("d20 + @half", { vars })).toThrow(RangeError);
+    expect(roll("d20 + @str").total).toBe(4); // an unused bad value is never read
+  });
+
+  it("is read once by compileDice", () => {
+    const attack = compileDice("d20 + @str", { vars });
+    expect(attack.roll({ random: () => 1 }).total).toBe(4);
+  });
+
+  it("reads as its value in explainDice", () => {
+    expect(explainDice("@level d6 + @mod", { vars })).toEqual(["Roll 4d6.", "Subtract 2.", "The total is the sum of the faces."]);
+  });
+});
+
+describe("trigger checks per source", () => {
+  it("rejects an unbounded trigger one source can never stop, whatever the others roll", () => {
+    expect(validateDice("(d[3,3]+d6)!")?.code).toBe("endless-trigger");
+    expect(validateDice("(d[1,1]+d6)rru1")?.code).toBe("endless-trigger");
+    expect(validateDice("(-d[3,3]+d6)!")?.code).toBe("endless-trigger"); // operators read raw rolls
+    expect(validateDice("((d[3,3]max2)ru2+d6)!")?.code).toBe("endless-trigger"); // the reroll lifts 2 back to 3
+  });
+
+  it("accepts it when that source can never reach the operator", () => {
+    expect(validateDice("(d[3,3]dh1+d6)!")).toBeNull(); // dropped by count
+    expect(validateDice("(d[3,3]du3+d6)!")).toBeNull(); // dropped by value
+    expect(validateDice("(d[3,3]max2+d6)!")).toBeNull(); // clamped under the trigger
+    expect(validateDice("d[3,3]max2!")).toBeNull();
+    expect(lintDice("d[3,3]max2!").map((w) => w.code)).toEqual(["inert-operator"]);
+    expect(validateDice("(2d6+d[3,3])!!")).toBeNull(); // bounded
+  });
+});
+
+describe("raised limits", () => {
+  it("keeps a vertical seat exact, under a count too", () => {
+    const limits = { value: Number.MAX_SAFE_INTEGER };
+    const code = (input: string) => {
+      try {
+        rollDice(input, { limits, random: seq(1, 2) });
+        return "rolled";
+      } catch (error) {
+        return (error as DiceError).code;
+      }
+    };
+    expect(code("d[9007199254740991,2]**c")).toBe("result-too-large");
+    expect(code("d[9007199254740991,2]**")).toBe("result-too-large");
+  });
+
+  it("handles pools and face lists as large as the caps allow", () => {
+    expect(rollDice("150000d2", { limits: { draws: 150000 }, random: () => 1 }).total).toBe(150000);
+    expect(validateDice("d[1x150000]", { limits: { faces: 150000 } })).toBeNull();
+    expect(validateDice("d[1..150000]", { limits: { faces: 150000, value: 150000 } })).toBeNull();
+  });
+
+  it("caps a string face's positional value like a written one", () => {
+    expect(validateDice("d['a','b','c']", { limits: { value: 2 } })).toMatchObject({ code: "limit-value", index: 10 });
+    expect(validateDice("d['a'x3]", { limits: { value: 2 } })).toMatchObject({ code: "limit-value", index: 2 });
+    expect(validateDice("d['a','b','c'=1]", { limits: { value: 2 } })).toBeNull(); // an assigned value is its own
+  });
+});
+
+describe("subtotal color", () => {
+  it("is the name's first explicit color, whichever faces survive", () => {
+    const result = rollDice("(d6{#red,'fire'}+d6{#blue,'fire'})dl1", { random: seq(1, 2) });
+    expect(result.subtotals).toEqual([{ label: "fire", total: 2, color: "#cc3333" }]);
+    expect(result.faces.map((face) => face.color)).toEqual(["#cc3333", "#3366cc"]); // each face keeps its own
+  });
+});
+
+describe("expected tokens after a variable", () => {
+  it("lists what fits, as after a number", () => {
+    expect(validateDice("@n d6?", { vars: { n: 2 } })?.expected).toEqual(validateDice("2d6?")?.expected);
+    expect(validateDice("d6ko@dc?", { vars: { dc: 4 } })?.expected).toEqual(validateDice("d6ko4?")?.expected);
+  });
+});
+
+describe("middle-rank ties", () => {
+  it("keeps the tied faces in the middle positions", () => {
+    const kept = rollDice("(d6{'a'} + d6{'b'} + d6{'c'})km1", { random: () => 3 }).faces.filter((f) => !f.dropped);
+    expect(kept.map((face) => face.name)).toEqual(["b"]);
+  });
+});
+
+describe("compiled defaults", () => {
+  it("are read once, when compiling", () => {
+    const options: { random: RandomInt; autoColor?: (label: string) => string } = { random: () => 1 };
+    const compiled = compileDice("d6{'a'}", options);
+    options.random = () => 6;
+    options.autoColor = () => "#000000";
+    const result = compiled.roll();
+    expect(result.total).toBe(1);
+    expect(result.subtotals![0].color).not.toBe("#000000");
+    expect(compiled.roll({ random: () => 6 }).total).toBe(6); // a per-roll override still applies
+  });
+});
+
+describe("number literals", () => {
+  it("rejects one past the exact integer range, at its first digit", () => {
+    expect(validateDice("d6ko9007199254740993")).toMatchObject({ code: "syntax", index: 4 });
+    expect(validateDice("4d6kh99999999999999999999")).toMatchObject({ code: "syntax", index: 5 });
+    expect(validateDice("9007199254740992")).toMatchObject({ code: "syntax", index: 0 });
+    expect(validateDice("d6ko9007199254740991")).toBeNull();
   });
 });

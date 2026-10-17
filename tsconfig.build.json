@@ -1,4 +1,10 @@
 {
   "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // The shipped module carries no comments; the declarations, built by `tsconfig.types.json`,
+    // keep the doc comments editors show.
+    "removeComments": true,
+    "declaration": false
+  },
   "exclude": ["src/**/*.test.ts"]
 }

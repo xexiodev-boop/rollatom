@@ -21,6 +21,7 @@ const seedArb = fc.array(fc.nat({ max: 1 << 30 }), { minLength: 40, maxLength: 4
 const CODES = [
   "syntax",
   "unknown-color",
+  "unknown-variable",
   "dead-trigger",
   "endless-trigger",
   "limit-draws",
@@ -86,9 +87,7 @@ describe("engine contract (properties)", () => {
           ? reduction
           : scale.op === "x"
             ? reduction * scale.by
-            : scale.up
-              ? Math.ceil(reduction / scale.by)
-              : Math.floor(reduction / scale.by);
+            : (scale.up ? Math.ceil(reduction / scale.by) : Math.floor(reduction / scale.by)) || 0;
         expect(result.total).toBe(scaled);
         expect(Number.isInteger(result.total)).toBe(true);
       }),
@@ -103,7 +102,7 @@ describe("engine contract (properties)", () => {
         const live = result.faces.filter((f) => !f.dropped);
         expect(result.values).toEqual(live.map((f) => f.value));
         for (const face of result.faces) {
-          expect(face.value).toBe(face.sign * face.raw);
+          expect(face.value).toBe(face.sign * face.raw || 0); // never -0
           expect(Math.abs(face.sign)).toBe(1);
         }
       }),

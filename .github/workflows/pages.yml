@@ -51,7 +51,7 @@ jobs:
       - name: Assemble the site
         run: |
           mkdir -p _site
-          cp playground/index.html _site/index.html
+          cp playground/index.html playground/logo.png playground/favicon.png _site/
           cp dist/index.js _site/rollatom.js
 
       - uses: actions/configure-pages@v5

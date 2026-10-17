@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { compileDice, DiceError, explainDice, rollDice, validateDice } from "./index";
+import { compileDice, DiceError, explainDice, lintDice, rollDice, validateDice } from "./index";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Documentation contract. `README.md` and `docs/GRAMMAR.md` state engine behavior as formula cells
@@ -50,9 +50,9 @@ const tableFormulas = (markdown: string): string[] => {
   return [...formulas];
 };
 
-// Rows of the README's error-code table: `| `code` | prose | `formula` |`. The header and the
-// separator carry no backticked code, and a row whose example is `--` carries no formula.
-const codeRows = (markdown: string): { code: string; formula: string }[] => {
+// Rows of a README code table: `| `code` | prose | `formula` |`. The header and the separator carry
+// no backticked code, and a row whose example is `--` carries no formula.
+const codeRows = (markdown: string, table = "Error codes"): { code: string; formula: string }[] => {
   const rows: { code: string; formula: string }[] = [];
   let section = "";
   for (const line of markdown.split("\n")) {
@@ -61,7 +61,7 @@ const codeRows = (markdown: string): { code: string; formula: string }[] => {
       section = heading[1]!;
       continue;
     }
-    if (section !== "Error codes" || !line.startsWith("|")) continue;
+    if (section !== table || !line.startsWith("|")) continue;
     const cells = line.split("|").map((cell) => cell.trim());
     const code = /^`([a-z-]+)`$/.exec(cells[1] ?? "")?.[1];
     const formula = /^`(.+)`$/.exec(cells[3] ?? "")?.[1];
@@ -229,6 +229,13 @@ describe("documentation contract", () => {
     });
 
     expect(actual).toEqual(rows.map((row) => row.code));
+  });
+
+  it("every example in the warning-code table produces only the code it is listed under", () => {
+    const rows = codeRows(read("README.md"), "Finding steps that do nothing");
+    expect(rows.length).toBe(4);
+
+    expect(rows.map(({ formula }) => lintDice(formula).map((warning) => warning.code))).toEqual(rows.map((row) => [row.code]));
   });
 
   it("the error type the documentation tells callers to branch on is the one thrown", () => {
